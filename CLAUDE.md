@@ -28,8 +28,8 @@ backend/
     analytics/       # AnalyticsService — win rate, Sharpe, equity curve, daily P&L
     scheduler/       # ArbitrageScheduler — @Scheduled loop
     alert/           # AlertService — email / desktop / SMS notifications
-    api/             # REST controllers (ArbitrageController, AuthController, ...)
-    model/           # JPA entities: Trade, TradeLeg, Setting, User
+    api/             # REST controllers (ArbitrageController, AuthController, BrokerController, StatsController, TradeController, TriangleController, SettingsController)
+    model/           # JPA entities: Trade, TradeLeg, Setting, User, TriangleConfig
     repository/      # Spring Data repos
     config/          # SecurityConfig, DataInitializer, WebSocketConfig, DashboardWebSocketHandler
   src/main/resources/
@@ -46,7 +46,7 @@ frontend/
     api/             # rest.ts — typed Axios client with 401 interceptor
     context/         # AuthContext.tsx — session auth state
     hooks/           # useDashboardSocket.ts, useAuth.ts
-    pages/           # Dashboard.tsx, Settings.tsx, Login.tsx
+    pages/           # Dashboard.tsx, Prices.tsx, Settings.tsx, Triangles.tsx, Login.tsx
     types.ts         # Shared TypeScript interfaces
   tsconfig.app.json  # TypeScript config for src/
   tsconfig.node.json # TypeScript config for vite.config.ts
@@ -54,10 +54,7 @@ frontend/
 
 db/
   migrations/
-    init.sql                 # trades + settings tables + default settings seed
-    002_simulation_mode.sql  # adds simulation_mode setting
-    003_add_trade_legs.sql   # trade_legs table (FK to trades)
-    004_add_users.sql        # users table for authentication
+    init.sql                 # all tables: trades, trade_legs, settings, users, triangles + seed data
 ```
 
 ## Build & Run (backend)
@@ -88,13 +85,10 @@ npx tsc --project tsconfig.app.json --noEmit  # type-check only
 
 ## Database Migrations
 
-Apply in order with `psql`:
+Apply with `psql`:
 
 ```bash
-psql -U arb -d arb -f db/migrations/init.sql
-psql -U arb -d arb -f db/migrations/002_simulation_mode.sql
-psql -U arb -d arb -f db/migrations/003_add_trade_legs.sql
-psql -U arb -d arb -f db/migrations/004_add_users.sql
+psql -U postgres -d trades -f db/migrations/init.sql
 ```
 
 `spring.jpa.hibernate.ddl-auto` is set to `validate` — Hibernate never modifies the schema.
@@ -122,11 +116,11 @@ Nine hardcoded FX triangles. For each triangle `(pair1, pair2, pair3)`:
 - **Cycle A:** `edge = bid1 × bid2 − ask3`
 - **Cycle B:** `edge = bid3 − ask1 × ask2`
 
-Valid when `edge > arb.edge-threshold` (default `0.00025`). `scan()` returns the single best `Signal` across all exchanges and triangles.
+Valid when `edge > arb.edge-threshold` (default `0.00025`). `scanForOpportunities()` returns the single best `Signal` across all active triangles (loaded from DB each cycle).
 
 ### Execution Flow (AutoTrader)
 
-1. `ArbitrageEngine.scan()` → best `Signal` or empty
+1. `ArbitrageEngine.scanForOpportunities()` → best `Signal` or empty
 2. `PositionService.hasAvailableBalance(exchange, currency, amount)` → balance check
 3. `RiskService.check(orderSize)` → position limit + daily loss hard-stop
 4. **Simulation mode** (`simulation_mode = 1` in settings): log the intended orders, treat as filled — no real Kraken calls
@@ -137,14 +131,14 @@ Valid when `edge > arb.edge-threshold` (default `0.00025`). `scan()` returns the
 
 Controlled by the `simulation_mode` setting (1 = on, 0 = off; default 1 = safe). When on:
 - `AutoTrader` logs `[SIM] Cycle A | BUY EURUSD, BUY USDJPY, SELL EURJPY | profit=...`
-- Trade is recorded as `FILLED` with leg status `SIMULATED`
+- Trade is recorded as `SIMULATION` with leg status `SIMULATED`
 - No HTTP calls to Kraken
 - `KrakenOrderClient.isConnected()` returns `true` regardless of API credentials
 - Toggled in the Settings UI
 
 ### Scheduler (ArbitrageScheduler)
 
-`@Scheduled(fixedDelay = 5000)` drives `AutoTrader.attemptArbitrage()`. Respects a `running` flag toggled by `/api/arbitrage/start` and `/api/arbitrage/stop`. Skips cycle if open orders ≥ `MAX_OPEN_ORDERS` (default `1`).
+`@Scheduled(fixedDelayString = "${arb.scan-interval-ms}")` drives `AutoTrader.attemptArbitrage()`. Respects a `running` flag toggled by `/api/arbitrage/start` and `/api/arbitrage/stop`. When `running=false` it still calls `autoTrader.broadcast()` so the Prices tab stays live. Auto-starts on boot when simulation mode is enabled. Skips cycle if open orders ≥ `max-open-orders` (default `1`).
 
 ## Database Schema
 
@@ -156,7 +150,7 @@ Controlled by the `simulation_mode` setting (1 = on, 0 = off; default 1 = safe).
 | direction | TEXT | `A` or `B` (cycle) |
 | spread | DOUBLE | profit edge |
 | pnl | DOUBLE | estimated P&L in USD |
-| status | TEXT | `FILLED` or `CANCELLED` |
+| status | TEXT | `FILLED`, `CANCELLED`, or `SIMULATION` |
 | latency_ms | DOUBLE | |
 
 ### `trade_legs`
@@ -189,6 +183,22 @@ Seeded defaults: `position_limit=50000`, `max_daily_loss=-1000`, `simulation_mod
 
 Admin user seeded on first startup by `DataInitializer`.
 
+### `triangles`
+| column | type | notes |
+|---|---|---|
+| id | BIGSERIAL PK | |
+| exchange | TEXT | e.g. `KRAKEN` |
+| pair1 | TEXT | e.g. `EURUSD` |
+| pair2 | TEXT | e.g. `USDJPY` |
+| pair3 | TEXT | e.g. `EURJPY` |
+| min_profit_usd | DOUBLE | minimum absolute profit threshold |
+| min_profit_percent | DOUBLE | minimum edge threshold (e.g. `0.00025`) |
+| status | TEXT | `ACTIVE` or `INACTIVE` |
+| hits | BIGINT | count of filled trades for this triangle |
+| total_profit_usd | DOUBLE | cumulative P&L for this triangle |
+
+Seven triangles seeded by default (all using KRAKEN exchange). `TriangleConfigRepository.incrementStats()` atomically increments `hits` and `total_profit_usd` after each filled trade.
+
 ## REST API
 
 All endpoints require authentication (session cookie) except `/api/auth/login` and `/api/auth/me`.
@@ -212,6 +222,11 @@ All endpoints require authentication (session cookie) except `/api/auth/login` a
 | GET | `/api/trades` | Last 20 trades (no legs) |
 | GET | `/api/trades/{id}` | Trade + all legs |
 | GET/PUT | `/api/settings` | Read / update risk settings |
+| GET | `/api/triangles` | List all triangle configs |
+| POST | `/api/triangles` | Create a triangle config |
+| PUT | `/api/triangles/{id}` | Update a triangle config |
+| DELETE | `/api/triangles/{id}` | Delete a triangle config |
+| POST | `/api/arbitrage/manual-trade` | `{triangleId, cycle, legs}` → `{tradeId, status, pnl}` — execute a manual trade bypassing cooldown |
 
 ## Key Configuration (`application.yml`)
 
@@ -221,6 +236,7 @@ arb:
   edge-threshold: 0.00025
   max-open-orders: 1
   scan-interval-ms: 5000
+  trade-cooldown-ms: 10000
 
 kraken:
   ws-url: wss://ws.kraken.com/v2
@@ -243,22 +259,26 @@ alert:
 
 Single-page dashboard. Auth state managed by `AuthProvider` — on load, calls `GET /api/auth/me` to restore session; shows login page if unauthenticated.
 
-**Shared types** (`src/types.ts`): `Trade`, `TradeLeg`, `TradeDetail`, `ArbitrageStats`, `DashboardSnapshot`, `EquityPoint`, `Setting`, `ExecutionStats`, `AnalyticsData`, `AuthUser`.
+**Shared types** (`src/types.ts`): `CycleDirection`, `LegDirection`, `TradeStatus` (`FILLED | CANCELLED | SIMULATION`), `LegStatus`, `Trade`, `TradeLeg`, `TradeDetail`, `ArbitrageStats`, `DashboardSnapshot`, `EquityPoint`, `Setting`, `ExecutionStats`, `AnalyticsData`, `AuthUser`, `PriceSnapshot`, `ManualLeg`, `TriangleStatus`, `TriangleConfig`.
 
-**WebSocket** (`useDashboardSocket`): connects to `/ws/dashboard`, returns `DashboardSnapshot | null`. The backend broadcasts after every cycle:
+**WebSocket** (`useDashboardSocket`): connects to `/ws/dashboard`, returns `DashboardSnapshot | null`. The backend broadcasts after every scheduler cycle (even when trading is paused):
 ```typescript
 interface DashboardSnapshot {
   dailyProfitAndLoss: number;
   brokerConnected: boolean;
   arbStats: ArbitrageStats;       // detected / executed / missed / avgEdge
   recentTrades: Trade[];          // last 20 (no legs — fetch /api/trades/{id} on click)
+  prices: PriceSnapshot[];        // current bid/ask for all subscribed pairs
+  tradeInProgress: boolean;       // true while live orders are being placed
 }
 ```
 
 **Pages:**
-- `Dashboard` — KPI cards, scanner/execution stats, equity curve chart (Recharts), trades table. Click a trade row to open `TradeDetailDialog` which fetches legs via `GET /api/trades/{id}`.
-- `Settings` — position limit, max daily loss, simulation mode toggle
-- `Login` — username/password form, inline error on 401
+- `Dashboard` — KPI cards, Start/Stop button, trade-in-progress banner, scanner/execution stats, equity curve chart (Recharts), trades table. Click a trade row to open `TradeDetailDialog` which fetches legs via `GET /api/trades/{id}`.
+- `Prices` — live bid/ask table for all subscribed pairs, streamed via WebSocket.
+- `Settings` — position limit, max daily loss, simulation mode toggle.
+- `Triangles` — CRUD for triangle configs; play button opens a manual trade dialog with per-leg editable price and volume (pre-filled from live prices).
+- `Login` — username/password form, inline error on 401.
 
 **Vite proxy** (dev): `/api` → `http://localhost:8080`, `/ws` → `ws://localhost:8080`. This makes session cookies work without CORS issues.
 
@@ -276,10 +296,10 @@ Use `var` for local variables where the type is clear from the right-hand side. 
 
 ```java
 // preferred
-var signal = arbitrageEngine.scan();
+var signal = arbitrageEngine.scanForOpportunities();
 var trades = tradeRepo.findTop20ByOrderByTimeDesc();
 
 // keep explicit
 private final ArbitrageEngine arbitrageEngine;
-public Optional<Signal> scan() { ... }
+public Optional<Signal> scanForOpportunities() { ... }
 ```
