@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-  Box, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
+  Alert, Box, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
   Grid, IconButton, Paper, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Typography,
 } from '@mui/material';
@@ -132,6 +132,12 @@ export default function Dashboard() {
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
       <Typography variant="h4" gutterBottom>Triangular Arbitrage Dashboard</Typography>
+
+      {live?.tradeInProgress && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Trade executing — new cycles paused until complete
+        </Alert>
+      )}
 
       {/* Row 1: KPI cards */}
       <Grid container spacing={2} sx={{ mb: 2 }}>
@@ -264,7 +270,7 @@ export default function Dashboard() {
                   <TableCell>
                     <Chip
                       label={t.status}
-                      color={t.status === 'FILLED' ? 'success' : 'default'}
+                      color={t.status === 'FILLED' ? 'success' : t.status === 'SIMULATION' ? 'info' : 'default'}
                       size="small"
                     />
                   </TableCell>

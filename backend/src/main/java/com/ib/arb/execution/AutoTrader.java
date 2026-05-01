@@ -26,7 +26,7 @@ import java.util.List;
  *
  * <p>Called by {@code ArbitrageScheduler} on a fixed delay. The full cycle is:
  * <ol>
- *   <li>Skip if the open-order limit is reached.</li>
+ *   <li>Skip if within the post-trade cooldown window or open-order limit is reached.</li>
  *   <li>Ask {@link ArbitrageEngine} for the best current signal.</li>
  *   <li>Confirm sufficient exchange balance via {@link PositionService}.</li>
  *   <li>Run pre-trade risk checks via {@link RiskService}.</li>
@@ -34,9 +34,6 @@ import java.util.List;
  *   <li>Persist the {@link Trade} and its {@link TradeLeg}s.</li>
  *   <li>Broadcast a {@link DashboardSnapshot} to all connected WebSocket clients.</li>
  * </ol>
- *
- * <p>Counters ({@code detected}, {@code executed}, {@code missed}) are in-memory and reset
- * on restart. They are exposed via {@link #getStats()} for the dashboard and REST API.
  */
 @Service
 public class AutoTrader {
@@ -57,12 +54,17 @@ public class AutoTrader {
     private volatile long executed = 0;
     private volatile long missed = 0;
     private volatile double totalEdge = 0;
+    private volatile boolean executing = false;
+    private volatile long lastTradeCompletedMs = 0;
 
     @Value("${arb.order-size-usd}")
     private double orderSizeUsd;
 
     @Value("${arb.max-open-orders}")
     private int maxOpenOrders;
+
+    @Value("${arb.trade-cooldown-ms:10000}")
+    private long tradeCooldownMs;
 
     public AutoTrader(ArbitrageEngine arbitrageEngine, PositionService positions,
                       RiskService risk, KrakenOrderClient broker,
@@ -83,33 +85,29 @@ public class AutoTrader {
     /**
      * Payload broadcast to all WebSocket clients after each arbitrage cycle.
      *
-     * <p>Pushed whether the cycle resulted in a fill, a miss, or an abort — the
-     * frontend always receives an up-to-date snapshot. {@code recentTrades} contains
-     * only top-level trade data; legs must be fetched separately via
-     * {@code GET /api/trades/{id}}.
-     *
      * @param dailyProfitAndLoss cumulative P&amp;L since midnight UTC
      * @param brokerConnected    {@code true} if API credentials are set (or simulation mode is on)
      * @param arbStats           in-memory counters since last restart
      * @param recentTrades       last 20 trades ordered by time descending
      * @param prices             current bid/ask snapshot for every configured pair
+     * @param tradeInProgress    {@code true} while a live order combo is being placed
      */
     public record DashboardSnapshot(
         double dailyProfitAndLoss,
         boolean brokerConnected,
         ArbitrageStats arbStats,
         List<Trade> recentTrades,
-        List<PriceSnapshot> prices
+        List<PriceSnapshot> prices,
+        boolean tradeInProgress
     ) {}
 
     /**
-     * Attempts one arbitrage cycle. Returns immediately if the open-order limit is
-     * reached or no profitable signal exists.
+     * Attempts one arbitrage cycle. Returns immediately if within the cooldown window,
+     * the open-order limit is reached, or no profitable signal exists.
      *
      * <p>In simulation mode the broker is not called; orders are logged at INFO level
-     * and the trade is recorded as {@code FILLED} with leg status {@code SIMULATED}.
-     * In live mode, a partial fill (some legs succeed, some fail) results in a
-     * {@code CANCELLED} trade with individual leg statuses recorded for audit.
+     * and the trade is recorded as {@code SIMULATION}. In live mode, a partial fill
+     * results in a {@code CANCELLED} trade with individual leg statuses recorded for audit.
      */
     public void attemptArbitrage() {
         if (broker.openOrderCount() >= maxOpenOrders) {
@@ -117,7 +115,12 @@ public class AutoTrader {
             return;
         }
 
-        var signal = arbitrageEngine.scan();
+        if (System.currentTimeMillis() - lastTradeCompletedMs < tradeCooldownMs) {
+            broadcast();
+            return;
+        }
+
+        var signal = arbitrageEngine.scanForOpportunities();
         if (signal.isEmpty()) {
             broadcast();
             return;
@@ -144,6 +147,12 @@ public class AutoTrader {
             return;
         }
 
+        // Signal trade start — broadcast before placing orders so frontend shows the indicator
+        if (!broker.isSimulation()) {
+            executing = true;
+            broadcast();
+        }
+
         var start = System.currentTimeMillis();
         List<LegResult> legResults;
         if (broker.isSimulation()) {
@@ -158,6 +167,9 @@ public class AutoTrader {
         }
         var latencyMs = System.currentTimeMillis() - start;
 
+        executing = false;
+        lastTradeCompletedMs = System.currentTimeMillis();
+
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
         var estimatedPnl = filled ? s.profit() * orderSizeUsd : 0.0;
 
@@ -166,7 +178,7 @@ public class AutoTrader {
         trade.setDirection(s.cycle());
         trade.setSpread(s.profit());
         trade.setPnl(estimatedPnl);
-        trade.setStatus(filled ? "FILLED" : "CANCELLED");
+        trade.setStatus(broker.isSimulation() ? "SIMULATION" : filled ? "FILLED" : "CANCELLED");
         trade.setLatencyMs(latencyMs);
 
         for (var lr : legResults) {
@@ -204,12 +216,6 @@ public class AutoTrader {
      */
     public record ArbitrageStats(long detected, long executed, long missed, double avgEdge) {}
 
-    /**
-     * Returns a snapshot of the current in-memory performance counters.
-     *
-     * @return current {@link ArbitrageStats}; {@code avgEdge} is {@code 0.0} if nothing
-     *         has been detected yet
-     */
     public ArbitrageStats getStats() {
         return new ArbitrageStats(detected, executed, missed, detected > 0 ? totalEdge / detected : 0.0);
     }
@@ -220,7 +226,8 @@ public class AutoTrader {
             broker.isConnected(),
             getStats(),
             tradeRepo.findTop20ByOrderByTimeDesc(),
-            arbitrageEngine.currentSnapshots()
+            arbitrageEngine.currentSnapshots(),
+            executing
         ));
     }
 }

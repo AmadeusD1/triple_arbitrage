@@ -1,6 +1,6 @@
 export type CycleDirection = 'A' | 'B';
 export type LegDirection = 'BUY' | 'SELL';
-export type TradeStatus = 'FILLED' | 'CANCELLED';
+export type TradeStatus = 'FILLED' | 'CANCELLED' | 'SIMULATION';
 export type LegStatus = 'FILLED' | 'FAILED' | 'SIMULATED';
 
 export interface TradeLeg {
@@ -48,6 +48,7 @@ export interface DashboardSnapshot {
   arbStats: ArbitrageStats;
   recentTrades: Trade[];
   prices: PriceSnapshot[];
+  tradeInProgress: boolean;
 }
 
 export interface EquityPoint {

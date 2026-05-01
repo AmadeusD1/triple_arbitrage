@@ -24,11 +24,23 @@ function NavBar() {
     </Button>
   );
   return (
-    <Box sx={{ display: 'flex', gap: 1, px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
-      {nav('/', 'Dashboard')}
-      {nav('/prices', 'Prices')}
-      {nav('/settings', 'Settings')}
-      {nav('/triangles', 'Triangles')}
+    <Box
+      component="nav"
+      sx={{
+        position: 'sticky',
+        top: 0,
+        zIndex: (t) => t.zIndex.appBar,
+        bgcolor: 'background.paper',
+        borderBottom: 1,
+        borderColor: 'divider',
+      }}
+    >
+      <Box sx={{ display: 'flex', gap: 1, px: 2, py: 1 }}>
+        {nav('/', 'Dashboard')}
+        {nav('/prices', 'Prices')}
+        {nav('/settings', 'Settings')}
+        {nav('/triangles', 'Triangles')}
+      </Box>
     </Box>
   );
 }
@@ -49,13 +61,15 @@ function AppRoutes() {
 
   const path = window.location.pathname;
   return (
-    <>
+    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <NavBar />
-      {path === '/prices'    && <Prices prices={live?.prices ?? []} />}
-      {path === '/settings'  && <Settings />}
-      {path === '/triangles' && <Triangles />}
-      {path !== '/prices' && path !== '/settings' && path !== '/triangles' && <Dashboard />}
-    </>
+      <Box component="main" sx={{ flex: 1 }}>
+        {path === '/prices'    && <Prices prices={live?.prices ?? []} />}
+        {path === '/settings'  && <Settings />}
+        {path === '/triangles' && <Triangles />}
+        {path !== '/prices' && path !== '/settings' && path !== '/triangles' && <Dashboard />}
+      </Box>
+    </Box>
   );
 }
 

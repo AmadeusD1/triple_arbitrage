@@ -75,7 +75,7 @@ public class ArbitrageEngine {
      * @return the best {@link Signal} across all exchanges and triangles, or
      *         {@link Optional#empty()} if no profitable opportunity exists
      */
-    public Optional<Signal> scan() {
+    public Optional<Signal> scanForOpportunities() {
         var active = triangleRepo.findByStatus("ACTIVE");
         return feeds.stream()
             .flatMap(feed -> active.stream()

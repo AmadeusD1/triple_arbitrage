@@ -69,6 +69,7 @@ class AutoTraderTest {
                                     tradeRepo, alerts, analytics, ws, triangleRepo);
         ReflectionTestUtils.setField(autoTrader, "orderSizeUsd", 100_000.0);
         ReflectionTestUtils.setField(autoTrader, "maxOpenOrders", 1);
+        ReflectionTestUtils.setField(autoTrader, "tradeCooldownMs", 0L);
 
         when(tradeRepo.findTop20ByOrderByTimeDesc()).thenReturn(List.of());
         when(analytics.dailyProfitAndLoss()).thenReturn(0.0);
@@ -84,13 +85,13 @@ class AutoTraderTest {
 
         autoTrader.attemptArbitrage();
 
-        verify(arbitrageEngine, never()).scan();
+        verify(arbitrageEngine, never()).scanForOpportunities();
     }
 
     @Test
     void skips_whenNoSignal() {
         when(broker.openOrderCount()).thenReturn(0);
-        when(arbitrageEngine.scan()).thenReturn(Optional.empty());
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.empty());
 
         autoTrader.attemptArbitrage();
 
@@ -100,7 +101,7 @@ class AutoTraderTest {
     @Test
     void incrementsMissed_whenBalanceInsufficient() {
         when(broker.openOrderCount()).thenReturn(0);
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(false);
 
         autoTrader.attemptArbitrage();
@@ -112,7 +113,7 @@ class AutoTraderTest {
     @Test
     void incrementsMissed_whenRiskBlocked() {
         when(broker.openOrderCount()).thenReturn(0);
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.block("limit"));
 
@@ -129,7 +130,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(broker.computeLegs(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
@@ -139,7 +140,7 @@ class AutoTraderTest {
         var captor = ArgumentCaptor.forClass(Trade.class);
         verify(tradeRepo).save(captor.capture());
         var saved = captor.getValue();
-        assertThat(saved.getStatus()).isEqualTo("FILLED");
+        assertThat(saved.getStatus()).isEqualTo("SIMULATION");
         assertThat(saved.getLegs()).hasSize(3);
         assertThat(saved.getLegs()).allMatch(l -> "SIMULATED".equals(l.getStatus()));
         assertThat(autoTrader.getStats().executed()).isEqualTo(1);
@@ -153,7 +154,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeComboOrder(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
@@ -178,7 +179,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeComboOrder(any(), anyDouble())).thenReturn(ONE_FAILED_LEG);
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
@@ -200,7 +201,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeComboOrder(any(), anyDouble())).thenReturn(List.of());
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
@@ -217,7 +218,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeComboOrder(any(), anyDouble())).thenReturn(ONE_FAILED_LEG);
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
@@ -238,7 +239,7 @@ class AutoTraderTest {
 
         var sig1 = new Signal(Exchange.KRAKEN, TRI, "A", 0.001);
         var sig2 = new Signal(Exchange.KRAKEN, TRI, "A", 0.003);
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(sig1), Optional.of(sig2));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(sig1), Optional.of(sig2));
 
         autoTrader.attemptArbitrage();
         autoTrader.attemptArbitrage();
@@ -260,7 +261,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(broker.computeLegs(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
 
@@ -275,7 +276,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(broker.computeLegs(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
-        when(arbitrageEngine.scan()).thenReturn(Optional.of(signalB));
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(signalB));
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
 

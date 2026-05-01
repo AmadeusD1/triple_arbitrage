@@ -13,6 +13,7 @@ arb:
   edge-threshold: 0.00025
   max-open-orders: 1
   scan-interval-ms: 5000
+  trade-cooldown-ms: 10000
 
 kraken:
   ws-url: wss://ws.kraken.com/v2

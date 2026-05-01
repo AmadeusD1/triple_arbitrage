@@ -68,7 +68,7 @@ class ArbitrageEngineTest {
 
     @Test
     void scan_returnsEmpty_whenNoFeeds() {
-        assertThat(engine().scan()).isEmpty();
+        assertThat(engine().scanForOpportunities()).isEmpty();
     }
 
     @Test
@@ -77,7 +77,7 @@ class ArbitrageEngineTest {
         when(feed.getExchange()).thenReturn(Exchange.KRAKEN);
         when(feed.getSnapshot("EURUSD")).thenReturn(null);
 
-        assertThat(engine(feed).scan()).isEmpty();
+        assertThat(engine(feed).scanForOpportunities()).isEmpty();
     }
 
     @Test
@@ -88,7 +88,7 @@ class ArbitrageEngineTest {
             "USDJPY", 150.00, 150.01,
             "EURJPY", 162.001, 162.01
         );
-        assertThat(engine(feed).scan()).isEmpty();
+        assertThat(engine(feed).scanForOpportunities()).isEmpty();
     }
 
     // ── cycle A ───────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ class ArbitrageEngineTest {
             "USDJPY", 150.00, 150.01,
             "EURJPY", 161.50, 161.90   // bid < ask (valid); ask=161.90 < 162.0 → Cycle A fires
         );
-        var signal = engine(feed).scan();
+        var signal = engine(feed).scanForOpportunities();
 
         assertThat(signal).isPresent();
         assertThat(signal.get().cycle()).isEqualTo("A");
@@ -119,7 +119,7 @@ class ArbitrageEngineTest {
             "USDJPY", 150.00, 150.01,
             "EURJPY", 162.20, 162.30
         );
-        var signal = engine(feed).scan();
+        var signal = engine(feed).scanForOpportunities();
 
         assertThat(signal).isPresent();
         assertThat(signal.get().cycle()).isEqualTo("B");
@@ -143,7 +143,7 @@ class ArbitrageEngineTest {
         );
         when(feed2.getExchange()).thenReturn(Exchange.KRAKEN);
 
-        var signal = engine(feed1, feed2).scan();
+        var signal = engine(feed1, feed2).scanForOpportunities();
 
         assertThat(signal).isPresent();
         assertThat(signal.get().profit()).isGreaterThan(0.09);
@@ -165,7 +165,7 @@ class ArbitrageEngineTest {
             "EURJPY", 161.50, 161.90  // edge would be profitable if exchange matched
         );
 
-        assertThat(engine(repo, feed).scan()).isEmpty();
+        assertThat(engine(repo, feed).scanForOpportunities()).isEmpty();
     }
 
     // ── per-triangle threshold ────────────────────────────────────────────────
@@ -183,13 +183,13 @@ class ArbitrageEngineTest {
         highThreshold.setMinProfitPercent(0.5);  // edge 0.10 < 0.5 → no signal
         var repoHigh = mock(TriangleConfigRepository.class);
         when(repoHigh.findByStatus("ACTIVE")).thenReturn(List.of(highThreshold));
-        assertThat(engine(repoHigh, feed).scan()).isEmpty();
+        assertThat(engine(repoHigh, feed).scanForOpportunities()).isEmpty();
 
         var lowThreshold = cfg("EURUSD", "USDJPY", "EURJPY");
         lowThreshold.setMinProfitPercent(0.00001);  // edge 0.10 > 0.00001 → signal
         var repoLow = mock(TriangleConfigRepository.class);
         when(repoLow.findByStatus("ACTIVE")).thenReturn(List.of(lowThreshold));
-        assertThat(engine(repoLow, feed).scan()).isPresent();
+        assertThat(engine(repoLow, feed).scanForOpportunities()).isPresent();
     }
 
     @Test
@@ -199,7 +199,7 @@ class ArbitrageEngineTest {
             "USDJPY", 150.00, 150.01,
             "EURJPY", 161.50, 161.90
         );
-        var signal = engine(feed).scan();
+        var signal = engine(feed).scanForOpportunities();
 
         assertThat(signal).isPresent();
         assertThat(signal.get().config()).isSameAs(EUR_USD_JPY);
