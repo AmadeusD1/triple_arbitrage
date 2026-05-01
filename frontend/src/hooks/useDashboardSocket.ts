@@ -6,17 +6,31 @@ export function useDashboardSocket(): DashboardSnapshot | null {
   const ws = useRef<WebSocket | null>(null);
 
   useEffect(() => {
+    let alive = true;
+    let retryTimer: ReturnType<typeof setTimeout>;
+
     function connect() {
+      if (!alive) return;
       const url = `ws://${window.location.host}/ws/dashboard`;
-      ws.current = new WebSocket(url);
-      ws.current.onmessage = (e: MessageEvent<string>) =>
-        setData(JSON.parse(e.data) as DashboardSnapshot);
-      ws.current.onclose = () => setTimeout(connect, 2000);
+      const socket = new WebSocket(url);
+      ws.current = socket;
+      socket.onmessage = (e: MessageEvent<string>) => {
+        if (alive) setData(JSON.parse(e.data) as DashboardSnapshot);
+      };
+      socket.onclose = () => {
+        if (alive) retryTimer = setTimeout(connect, 2000);
+      };
     }
-    connect();
+
+    // Defer to next tick so StrictMode's cleanup can cancel before the
+    // socket is created, avoiding "closed before established" errors.
+    retryTimer = setTimeout(connect, 0);
+
     return () => {
+      alive = false;
+      clearTimeout(retryTimer);
       if (ws.current) {
-        ws.current.onclose = null;  // prevent reconnect on cleanup/unmount
+        ws.current.onclose = null;
         ws.current.close();
       }
     };

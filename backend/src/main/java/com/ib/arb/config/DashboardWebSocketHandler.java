@@ -15,10 +15,17 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
 
     private final Set<WebSocketSession> sessions = new CopyOnWriteArraySet<>();
     private final ObjectMapper mapper = new ObjectMapper();
+    private volatile String lastPayload = null;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         sessions.add(session);
+        // Send the last known snapshot immediately so the client doesn't
+        // have to wait for the next scheduler tick.
+        if (lastPayload != null) {
+            try { session.sendMessage(new TextMessage(lastPayload)); }
+            catch (Exception ignored) {}
+        }
     }
 
     @Override
@@ -26,10 +33,10 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
         sessions.remove(session);
     }
 
-    // Called after each arbitrage cycle to push a snapshot to all connected clients.
     public void broadcast(Object payload) {
         try {
-            var message = new TextMessage(mapper.writeValueAsString(payload));
+            lastPayload = mapper.writeValueAsString(payload);
+            var message = new TextMessage(lastPayload);
             for (var session : sessions) {
                 if (session.isOpen()) session.sendMessage(message);
             }

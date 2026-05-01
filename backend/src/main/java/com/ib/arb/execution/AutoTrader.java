@@ -112,10 +112,16 @@ public class AutoTrader {
      * {@code CANCELLED} trade with individual leg statuses recorded for audit.
      */
     public void attemptArbitrage() {
-        if (broker.openOrderCount() >= maxOpenOrders) return;
+        if (broker.openOrderCount() >= maxOpenOrders) {
+            broadcast();
+            return;
+        }
 
         var signal = arbitrageEngine.scan();
-        if (signal.isEmpty()) return;
+        if (signal.isEmpty()) {
+            broadcast();
+            return;
+        }
 
         detected++;
         var s = signal.get();
@@ -127,12 +133,14 @@ public class AutoTrader {
             : pair1.substring(0, 3);
         if (!positions.hasAvailableBalance(s.exchange(), spentCurrency, orderSizeUsd)) {
             missed++;
+            broadcast();
             return;
         }
 
         var riskResult = risk.check(orderSizeUsd);
         if (!riskResult.allowed()) {
             missed++;
+            broadcast();
             return;
         }
 
@@ -183,13 +191,7 @@ public class AutoTrader {
             missed++;
         }
 
-        wsHandler.broadcast(new DashboardSnapshot(
-            analytics.dailyProfitAndLoss(),
-            broker.isConnected(),
-            getStats(),
-            tradeRepo.findTop20ByOrderByTimeDesc(),
-            arbitrageEngine.currentSnapshots()
-        ));
+        broadcast();
     }
 
     /**
@@ -210,5 +212,15 @@ public class AutoTrader {
      */
     public ArbitrageStats getStats() {
         return new ArbitrageStats(detected, executed, missed, detected > 0 ? totalEdge / detected : 0.0);
+    }
+
+    public void broadcast() {
+        wsHandler.broadcast(new DashboardSnapshot(
+            analytics.dailyProfitAndLoss(),
+            broker.isConnected(),
+            getStats(),
+            tradeRepo.findTop20ByOrderByTimeDesc(),
+            arbitrageEngine.currentSnapshots()
+        ));
     }
 }

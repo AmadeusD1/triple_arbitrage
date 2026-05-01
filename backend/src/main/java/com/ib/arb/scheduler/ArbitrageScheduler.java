@@ -18,7 +18,10 @@ public class ArbitrageScheduler {
 
     @Scheduled(fixedDelayString = "${arb.scan-interval-ms}")
     public void cycle() {
-        if (!running.get()) return;
+        if (!running.get()) {
+            autoTrader.broadcast();  // push prices even when trading is paused
+            return;
+        }
         autoTrader.attemptArbitrage();
     }
 

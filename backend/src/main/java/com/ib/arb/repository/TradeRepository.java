@@ -3,6 +3,7 @@ package com.ib.arb.repository;
 import com.ib.arb.model.Trade;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -15,8 +16,8 @@ public interface TradeRepository extends JpaRepository<Trade, Long> {
     List<Trade> findByTimeAfter(LocalDateTime since);
 
     @Query("SELECT SUM(t.pnl) FROM Trade t WHERE t.time >= :since")
-    Double sumPnlSince(LocalDateTime since);
+    Double sumPnlSince(@Param("since") LocalDateTime since);
 
     @Query("SELECT t FROM Trade t LEFT JOIN FETCH t.legs WHERE t.id = :id")
-    Optional<Trade> findByIdWithLegs(Long id);
+    Optional<Trade> findByIdWithLegs(@Param("id") Long id);
 }
