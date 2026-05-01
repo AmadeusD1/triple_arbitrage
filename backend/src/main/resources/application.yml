@@ -1,8 +1,8 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/arb
-    username: ${DB_USER:arb}
-    password: ${DB_PASS:arb}
+    url: jdbc:postgresql://localhost:5432/trades
+    username: ${DB_USER:postgres}
+    password: ${DB_PASS:postgres}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -15,9 +15,9 @@ arb:
   scan-interval-ms: 5000
 
 kraken:
-  ws-url: wss://ws.kraken.com/v2
-  api-key: ${KRAKEN_API_KEY:}
-  api-secret: ${KRAKEN_API_SECRET:}
+  ws-url: wss://ws.kraken.com
+  api-key: 2+xhOGxgWPDLgDyenaoOkabb79c0sTtu02FNPIpphOKZzZe209Le+NKYDPm5pfLMHy66DCnA5QeuWGXqSawzyA== #${KRAKEN_API_KEY:}
+  api-secret: CuUXlJ6bnW9iHEEiHvJiJ+1e+vkEPj7igCAbqM4UyOI4NqvCel+2aI4f #${KRAKEN_API_SECRET:}
   position-cache-ttl-ms: 2000
 
 alert:

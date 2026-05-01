@@ -1,6 +1,7 @@
 package com.ib.arb.alert;
 
 import com.ib.arb.scanner.Signal;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -17,7 +18,7 @@ public class AlertService {
     @Value("${alert.email-to:}")
     private String emailTo;
 
-    public AlertService(JavaMailSender mailSender) {
+    public AlertService(@Autowired(required = false) JavaMailSender mailSender) {
         this.mailSender = mailSender;
     }
 
@@ -28,7 +29,7 @@ public class AlertService {
     }
 
     private void send(String subject, String body) {
-        if (emailTo == null || emailTo.isBlank()) return;
+        if (mailSender == null || emailTo == null || emailTo.isBlank()) return;
         try {
             var message = new SimpleMailMessage();
             message.setFrom(emailFrom);
