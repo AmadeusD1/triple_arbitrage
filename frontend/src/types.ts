@@ -35,11 +35,19 @@ export interface ArbitrageStats {
   avgEdge: number;
 }
 
+export interface PriceSnapshot {
+  exchange: string;
+  pair: string;
+  bid: number;
+  ask: number;
+}
+
 export interface DashboardSnapshot {
   dailyProfitAndLoss: number;
   brokerConnected: boolean;
   arbStats: ArbitrageStats;
   recentTrades: Trade[];
+  prices: PriceSnapshot[];
 }
 
 export interface EquityPoint {

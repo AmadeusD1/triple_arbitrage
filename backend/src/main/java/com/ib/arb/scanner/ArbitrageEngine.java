@@ -1,13 +1,16 @@
 package com.ib.arb.scanner;
 
 import com.ib.arb.marketdata.OrderBookFeed;
+import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.TriangleConfig;
 import com.ib.arb.repository.TriangleConfigRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /**
  * Scans all registered exchange feeds for triangular arbitrage opportunities.
@@ -43,6 +46,25 @@ public class ArbitrageEngine {
         return triangleRepo.findAll().stream()
             .flatMap(t -> List.of(t.getPair1(), t.getPair2(), t.getPair3()).stream())
             .distinct()
+            .toList();
+    }
+
+    /**
+     * Returns a current bid/ask snapshot for every configured pair across all feeds.
+     * Pairs with no valid snapshot (feed not yet connected) are omitted.
+     */
+    public List<PriceSnapshot> currentSnapshots() {
+        var pairs = triangleRepo.findAll().stream()
+            .flatMap(t -> Stream.of(t.getPair1(), t.getPair2(), t.getPair3()))
+            .distinct()
+            .toList();
+        return feeds.stream()
+            .flatMap(feed -> pairs.stream()
+                .map(pair -> feed.getSnapshot(pair))
+                .filter(snap -> snap != null && snap.isValid())
+                .map(snap -> new PriceSnapshot(
+                    feed.getExchange().name(), snap.pair(), snap.bid(), snap.ask())))
+            .filter(Objects::nonNull)
             .toList();
     }
 

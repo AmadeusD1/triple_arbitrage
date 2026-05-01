@@ -115,9 +115,9 @@ export default function Dashboard() {
       const [dd, sh, wr, ex, eq] = await Promise.all([
         getDrawdown(), getSharpe(), getWinRate(), getExecution(), getEquity(),
       ]);
-      setAnalytics({ drawdown: dd.data.drawdown, sharpe: sh.data.sharpe, winRate: wr.data.winRate });
-      setExecution(ex.data);
-      setEquity(eq.data);
+      setAnalytics({ drawdown: dd.data.drawdown ?? 0, sharpe: sh.data.sharpe ?? 0, winRate: wr.data.winRate ?? 0 });
+      setExecution({ avgLatency: ex.data.avgLatency ?? 0, maxLatency: ex.data.maxLatency ?? 0, fillRate: ex.data.fillRate ?? 0 });
+      setEquity(eq.data ?? []);
     };
     void load();
     const t = setInterval(() => void load(), 10_000);

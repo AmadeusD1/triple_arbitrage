@@ -5,6 +5,7 @@ import com.ib.arb.analytics.AnalyticsService;
 import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.broker.KrakenOrderClient.LegResult;
 import com.ib.arb.config.DashboardWebSocketHandler;
+import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TradeLeg;
 import com.ib.arb.position.PositionService;
@@ -91,12 +92,14 @@ public class AutoTrader {
      * @param brokerConnected    {@code true} if API credentials are set (or simulation mode is on)
      * @param arbStats           in-memory counters since last restart
      * @param recentTrades       last 20 trades ordered by time descending
+     * @param prices             current bid/ask snapshot for every configured pair
      */
     public record DashboardSnapshot(
         double dailyProfitAndLoss,
         boolean brokerConnected,
         ArbitrageStats arbStats,
-        List<Trade> recentTrades
+        List<Trade> recentTrades,
+        List<PriceSnapshot> prices
     ) {}
 
     /**
@@ -184,7 +187,8 @@ public class AutoTrader {
             analytics.dailyProfitAndLoss(),
             broker.isConnected(),
             getStats(),
-            tradeRepo.findTop20ByOrderByTimeDesc()
+            tradeRepo.findTop20ByOrderByTimeDesc(),
+            arbitrageEngine.currentSnapshots()
         ));
     }
 

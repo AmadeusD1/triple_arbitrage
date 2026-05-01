@@ -14,7 +14,12 @@ export function useDashboardSocket(): DashboardSnapshot | null {
       ws.current.onclose = () => setTimeout(connect, 2000);
     }
     connect();
-    return () => ws.current?.close();
+    return () => {
+      if (ws.current) {
+        ws.current.onclose = null;  // prevent reconnect on cleanup/unmount
+        ws.current.close();
+      }
+    };
   }, []);
 
   return data;
