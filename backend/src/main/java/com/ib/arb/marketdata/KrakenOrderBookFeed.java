@@ -3,6 +3,8 @@ package com.ib.arb.marketdata;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +21,8 @@ import java.util.concurrent.TimeUnit;
 
 @Component
 public class KrakenOrderBookFeed implements OrderBookFeed {
+
+    private static final Logger log = LoggerFactory.getLogger(KrakenOrderBookFeed.class);
 
     @Value("${kraken.ws-url:wss://ws.kraken.com/v2}")
     private String wsUrl;
@@ -76,6 +80,15 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
     private void handleMessage(String json) {
         try {
             var node = mapper.readTree(json);
+
+            if ("subscribe".equals(node.path("method").asText())
+                    && !node.path("success").asBoolean(true)) {
+                log.warn("Kraken subscription failed — pair '{}': {}",
+                    node.path("symbol").asText("unknown"),
+                    node.path("error").asText("unknown error"));
+                return;
+            }
+
             if (!"book".equals(node.path("channel").asText())) return;
 
             var type = node.path("type").asText();
@@ -109,7 +122,7 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
             msg.put("method", "subscribe");
             var params = msg.putObject("params");
             params.put("channel", "book");
-            params.put("depth", 1);
+            params.put("depth", 10);
             var arr = (ArrayNode) params.putArray("symbol");
             krakenSymbols.forEach(arr::add);
             return mapper.writeValueAsString(msg);

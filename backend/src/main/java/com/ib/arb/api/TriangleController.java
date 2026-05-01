@@ -30,7 +30,7 @@ public class TriangleController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<TriangleConfig> update(@PathVariable Long id,
+    public ResponseEntity<TriangleConfig> update(@PathVariable("id") Long id,
                                                   @RequestBody TriangleConfig body) {
         return triangleRepo.findById(id)
             .map(existing -> {
@@ -47,7 +47,7 @@ public class TriangleController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
+    public ResponseEntity<Void> delete(@PathVariable("id") Long id) {
         if (!triangleRepo.existsById(id)) return ResponseEntity.notFound().build();
         triangleRepo.deleteById(id);
         return ResponseEntity.noContent().build();

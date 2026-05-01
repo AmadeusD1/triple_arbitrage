@@ -28,7 +28,7 @@ public class TradeController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<TradeDetail> detail(@PathVariable Long id) {
+    public ResponseEntity<TradeDetail> detail(@PathVariable("id") Long id) {
         return tradeRepo.findByIdWithLegs(id)
             .map(t -> ResponseEntity.ok(TradeDetail.from(t)))
             .orElse(ResponseEntity.notFound().build());
