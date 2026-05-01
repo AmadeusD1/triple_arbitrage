@@ -54,7 +54,9 @@ public class StatsController {
     @GetMapping("/execution")
     public ResponseEntity<Map<String, Object>> executionStats() {
         var trades = tradeRepo.findAll();
-        if (trades.isEmpty()) return ResponseEntity.ok(Map.of());
+        if (trades.isEmpty()) return ResponseEntity.ok(Map.of(
+            "avgLatency", 0.0, "maxLatency", 0.0, "fillRate", 0.0
+        ));
 
         var avgLatency = trades.stream().mapToDouble(t -> t.getLatencyMs()).average().orElse(0);
         var maxLatency = trades.stream().mapToDouble(t -> t.getLatencyMs()).max().orElse(0);
