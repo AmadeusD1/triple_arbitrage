@@ -77,6 +77,14 @@ export interface AuthUser {
   username: string;
 }
 
+export interface ManualLeg {
+  legIndex: number;
+  pair: string;
+  direction: string;
+  price: number;
+  volume: number;
+}
+
 export type TriangleStatus = 'ACTIVE' | 'INACTIVE';
 
 export interface TriangleConfig {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-  Alert, Box, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
+  Alert, Box, Button, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
   Grid, IconButton, Paper, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Typography,
 } from '@mui/material';
@@ -9,7 +9,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import type { ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import { useDashboardSocket } from '../hooks/useDashboardSocket';
-import { getDrawdown, getEquity, getExecution, getSharpe, getWinRate, getTrade } from '../api/rest';
+import { getDrawdown, getEquity, getExecution, getSharpe, getWinRate, getTrade, getStatus, startArbitrage, stopArbitrage } from '../api/rest';
 import type { AnalyticsData, ExecutionStats, EquityPoint, TradeDetail, LegStatus } from '../types';
 
 interface StatCardProps {
@@ -109,20 +109,32 @@ export default function Dashboard() {
   const [execution, setExecution] = useState<ExecutionStats>({ avgLatency: 0, maxLatency: 0, fillRate: 0 });
   const [equity, setEquity] = useState<EquityPoint[]>([]);
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
+  const [running, setRunning] = useState(false);
 
   useEffect(() => {
     const load = async () => {
-      const [dd, sh, wr, ex, eq] = await Promise.all([
-        getDrawdown(), getSharpe(), getWinRate(), getExecution(), getEquity(),
+      const [dd, sh, wr, ex, eq, status] = await Promise.all([
+        getDrawdown(), getSharpe(), getWinRate(), getExecution(), getEquity(), getStatus(),
       ]);
       setAnalytics({ drawdown: dd.data.drawdown ?? 0, sharpe: sh.data.sharpe ?? 0, winRate: wr.data.winRate ?? 0 });
       setExecution({ avgLatency: ex.data.avgLatency ?? 0, maxLatency: ex.data.maxLatency ?? 0, fillRate: ex.data.fillRate ?? 0 });
       setEquity(eq.data ?? []);
+      setRunning(status.data.running);
     };
     void load();
     const t = setInterval(() => void load(), 10_000);
     return () => clearInterval(t);
   }, []);
+
+  const handleToggle = async () => {
+    if (running) {
+      await stopArbitrage();
+    } else {
+      await startArbitrage();
+    }
+    const s = await getStatus();
+    setRunning(s.data.running);
+  };
 
   const pnl       = live?.dailyProfitAndLoss ?? 0;
   const connected = live?.brokerConnected ?? false;
@@ -131,7 +143,16 @@ export default function Dashboard() {
 
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
-      <Typography variant="h4" gutterBottom>Triangular Arbitrage Dashboard</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+        <Typography variant="h4">Triangular Arbitrage Dashboard</Typography>
+        <Button
+          variant="contained"
+          color={running ? 'error' : 'success'}
+          onClick={() => void handleToggle()}
+        >
+          {running ? 'Stop' : 'Start'}
+        </Button>
+      </Box>
 
       {live?.tradeInProgress && (
         <Alert severity="warning" sx={{ mb: 2 }}>

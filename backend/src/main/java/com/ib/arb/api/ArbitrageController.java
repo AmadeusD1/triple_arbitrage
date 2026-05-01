@@ -1,9 +1,13 @@
 package com.ib.arb.api;
 
+import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.execution.AutoTrader;
+import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.scheduler.ArbitrageScheduler;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/arbitrage")
@@ -11,10 +15,13 @@ public class ArbitrageController {
 
     private final ArbitrageScheduler scheduler;
     private final AutoTrader autoTrader;
+    private final TriangleConfigRepository triangleConfigRepo;
 
-    public ArbitrageController(ArbitrageScheduler scheduler, AutoTrader autoTrader) {
+    public ArbitrageController(ArbitrageScheduler scheduler, AutoTrader autoTrader,
+                                TriangleConfigRepository triangleConfigRepo) {
         this.scheduler = scheduler;
         this.autoTrader = autoTrader;
+        this.triangleConfigRepo = triangleConfigRepo;
     }
 
     @PostMapping("/start")
@@ -34,5 +41,18 @@ public class ArbitrageController {
         return ResponseEntity.ok(new StatusResponse(scheduler.isRunning(), autoTrader.getStats()));
     }
 
+    @PostMapping("/manual-trade")
+    public ResponseEntity<AutoTrader.ManualTradeResult> manualTrade(@RequestBody ManualTradeRequest req) {
+        if (!"A".equals(req.cycle()) && !"B".equals(req.cycle()))
+            return ResponseEntity.badRequest().build();
+        if (req.legs() == null || req.legs().isEmpty())
+            return ResponseEntity.badRequest().build();
+        return triangleConfigRepo.findById(req.triangleId())
+            .map(config -> ResponseEntity.ok(
+                autoTrader.executeTrade(config, req.cycle(), req.legs())))
+            .orElse(ResponseEntity.notFound().build());
+    }
+
     public record StatusResponse(boolean running, AutoTrader.ArbitrageStats stats) {}
+    public record ManualTradeRequest(Long triangleId, String cycle, List<KrakenOrderClient.ManualLeg> legs) {}
 }

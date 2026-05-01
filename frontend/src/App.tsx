@@ -14,6 +14,7 @@ const PAGES = ['/', '/prices', '/settings', '/triangles'] as const;
 function NavBar() {
   const path = window.location.pathname;
   const active = PAGES.includes(path as typeof PAGES[number]) ? path : '/';
+  const { logout, user } = useAuth();
   const nav = (href: string, label: string) => (
     <Button
       size="small"
@@ -35,11 +36,14 @@ function NavBar() {
         borderColor: 'divider',
       }}
     >
-      <Box sx={{ display: 'flex', gap: 1, px: 2, py: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
         {nav('/', 'Dashboard')}
         {nav('/prices', 'Prices')}
         {nav('/settings', 'Settings')}
         {nav('/triangles', 'Triangles')}
+        <Box sx={{ flex: 1 }} />
+        <Box sx={{ color: 'text.secondary', fontSize: '0.8rem', mr: 1 }}>{user?.username}</Box>
+        <Button size="small" color="inherit" onClick={() => void logout()}>Logout</Button>
       </Box>
     </Box>
   );
@@ -66,7 +70,7 @@ function AppRoutes() {
       <Box component="main" sx={{ flex: 1 }}>
         {path === '/prices'    && <Prices prices={live?.prices ?? []} />}
         {path === '/settings'  && <Settings />}
-        {path === '/triangles' && <Triangles />}
+        {path === '/triangles' && <Triangles prices={live?.prices ?? []} />}
         {path !== '/prices' && path !== '/settings' && path !== '/triangles' && <Dashboard />}
       </Box>
     </Box>

@@ -75,6 +75,9 @@ public class KrakenOrderClient {
     public record LegResult(int legIndex, String pair, String direction,
                             double price, double volume, boolean filled, String orderId) {}
 
+    /** Caller-supplied leg specification used by manual trade execution. */
+    public record ManualLeg(int legIndex, String pair, String direction, double price, double volume) {}
+
     /** Internal metadata computed from the order book before any orders are placed. */
     private record LegMeta(int legIndex, String pair, String direction, double price, double volume) {}
 
@@ -161,6 +164,27 @@ public class KrakenOrderClient {
         openOrders.incrementAndGet();
         try {
             for (var l : meta) {
+                var krakenPair = KrakenOrderBookFeed.toKrakenSymbol(l.pair());
+                var txid = addOrder(krakenPair, l.direction().toLowerCase(), l.price(), l.volume());
+                results.add(new LegResult(l.legIndex(), l.pair(), l.direction(),
+                    l.price(), l.volume(), txid.isPresent(), txid.orElse(null)));
+                if (txid.isEmpty()) break;
+            }
+        } finally {
+            openOrders.decrementAndGet();
+        }
+        return results;
+    }
+
+    /**
+     * Places orders using caller-supplied prices and volumes rather than computing
+     * them from the live order book. Used for manual trade execution.
+     */
+    public List<LegResult> placeSpecificLegs(List<ManualLeg> legs) {
+        var results = new ArrayList<LegResult>();
+        openOrders.incrementAndGet();
+        try {
+            for (var l : legs) {
                 var krakenPair = KrakenOrderBookFeed.toKrakenSymbol(l.pair());
                 var txid = addOrder(krakenPair, l.direction().toLowerCase(), l.price(), l.volume());
                 results.add(new LegResult(l.legIndex(), l.pair(), l.direction(),
