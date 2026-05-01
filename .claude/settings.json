@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew compileJava)",
+      "Bash(npm run *)",
+      "Bash(mv /Users/htosun/dev/ib/backend/src/main/java/com/ib/arb/api/ArbController.java /Users/htosun/dev/ib/backend/src/main/java/com/ib/arb/api/ArbitrageController.java)",
+      "Bash(mv /Users/htosun/dev/ib/backend/src/main/java/com/ib/arb/ArbApplication.java /Users/htosun/dev/ib/backend/src/main/java/com/ib/arb/ArbitrageApplication.java)",
+      "Bash(mv /Users/htosun/dev/ib/backend/src/test/java/com/ib/arb/ArbApplicationTests.java /Users/htosun/dev/ib/backend/src/test/java/com/ib/arb/ArbitrageApplicationTests.java)",
+      "Bash(grep -r \"Arb\\\\|arb\\\\|Pnl\\\\|pnl\\\\|Scanner\\\\|scanner\\\\|Execution\\\\|execution\\\\|Ibkr\\\\|ibkr\\\\|IbkrClient\\\\|TWS\" /Users/htosun/dev/ib --include=\"*.java\" --include=\"*.jsx\" --include=\"*.js\" --include=\"*.yml\" --include=\"*.yaml\" ! -path \"*/node_modules/*\" -n)"
+    ],
+    "deny": [],
+    "additionalDirectories": [
+      "/Users/htosun/dev/ib/backend/src/main/java/com/ib/arb/execution"
+    ]
+  }
+}

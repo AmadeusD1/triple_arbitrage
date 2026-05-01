@@ -1,0 +1,31 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/arb
+    username: ${DB_USER:arb}
+    password: ${DB_PASS:arb}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+arb:
+  order-size-usd: 100000
+  edge-threshold: 0.00025
+  max-open-orders: 1
+  scan-interval-ms: 5000
+
+kraken:
+  ws-url: wss://ws.kraken.com/v2
+  api-key: ${KRAKEN_API_KEY:}
+  api-secret: ${KRAKEN_API_SECRET:}
+  position-cache-ttl-ms: 2000
+
+alert:
+  email-from: ${ALERT_EMAIL_FROM:}
+  email-password: ${ALERT_EMAIL_PASS:}
+  email-to: ${ALERT_EMAIL_TO:}
+
+app:
+  admin:
+    username: ${ADMIN_USERNAME:admin}
+    password: ${ADMIN_PASSWORD:admin}

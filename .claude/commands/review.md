@@ -1,0 +1,1 @@
+Review the current changes or the specified file/module for correctness, edge cases, and potential bugs. Focus on logic errors and runtime risks, not style. Report issues grouped by severity: critical, warning, note.

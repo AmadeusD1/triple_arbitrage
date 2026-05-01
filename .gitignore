@@ -1,0 +1,21 @@
+# Build artifacts
+backend/build/
+backend/.gradle/
+backend/bin/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# IDE / tools
+.idea/
+*.iml
+.metals/
+backend/.metals/
+.DS_Store
+
+# Secrets / local overrides
+backend/src/main/resources/application-local.yml
+*.env
+
+# Claude local config
+.claude/settings.local.json

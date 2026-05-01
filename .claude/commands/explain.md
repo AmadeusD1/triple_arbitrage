@@ -1,0 +1,1 @@
+Explain the selected code or the file/function passed as argument. Describe what it does, the key invariants, and any non-obvious behaviour. Keep it concise — one paragraph max unless the code is complex.
