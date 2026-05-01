@@ -1,6 +1,8 @@
 package com.ib.arb.alert;
 
 import com.ib.arb.scanner.Signal;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
@@ -9,6 +11,8 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class AlertService {
+
+    private static final Logger log = LoggerFactory.getLogger(AlertService.class);
 
     private final JavaMailSender mailSender;
 
@@ -38,7 +42,7 @@ public class AlertService {
             message.setText(body);
             mailSender.send(message);
         } catch (Exception e) {
-            // alert delivery failure must never crash the trading loop
+            log.error("Alert delivery failed: {}", e.getMessage());
         }
     }
 }
