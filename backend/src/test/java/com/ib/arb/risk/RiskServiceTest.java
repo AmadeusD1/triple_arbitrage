@@ -55,6 +55,15 @@ class RiskServiceTest {
         assertThat(riskService.check(51_000.0).allowed()).isFalse();
     }
 
+    @Test
+    void allows_whenOrderSizeEqualsPositionLimit() {
+        givenSetting("position_limit", 100_000.0);
+        when(trades.sumPnlSince(any())).thenReturn(0.0);
+
+        // exactly at the limit — should pass (condition is strictly greater-than)
+        assertThat(riskService.check(100_000.0).allowed()).isTrue();
+    }
+
     // ── daily loss ────────────────────────────────────────────────────────────
 
     @Test

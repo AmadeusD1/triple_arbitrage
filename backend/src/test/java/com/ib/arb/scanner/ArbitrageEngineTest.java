@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -229,5 +230,79 @@ class ArbitrageEngineTest {
             "GBPUSD", "USDCHF", "GBPCHF",
             "EURGBP", "AUDUSD", "AUDJPY"
         );
+    }
+
+    // ── currentSnapshots ──────────────────────────────────────────────────────
+
+    @Test
+    void currentSnapshots_isEmpty_whenNoFeeds() {
+        assertThat(engine().currentSnapshots()).isEmpty();
+    }
+
+    @Test
+    void currentSnapshots_isEmpty_whenSnapshotNull() {
+        var feed = mock(OrderBookFeed.class);
+        when(feed.getExchange()).thenReturn(Exchange.KRAKEN);
+        when(feed.getSnapshot(anyString())).thenReturn(null);
+
+        assertThat(engine(feed).currentSnapshots()).isEmpty();
+    }
+
+    @Test
+    void currentSnapshots_omitsInvalidSnapshot() {
+        var feed = mock(OrderBookFeed.class);
+        when(feed.getExchange()).thenReturn(Exchange.KRAKEN);
+        // invalid: bid == ask
+        when(feed.getSnapshot("EURUSD")).thenReturn(new OrderBook("EURUSD", 1.08, 1.08));
+        when(feed.getSnapshot("USDJPY")).thenReturn(new OrderBook("USDJPY", 150.0, 150.01));
+        when(feed.getSnapshot("EURJPY")).thenReturn(new OrderBook("EURJPY", 161.5, 161.9));
+
+        var snapshots = engine(feed).currentSnapshots();
+
+        assertThat(snapshots).extracting(com.ib.arb.marketdata.PriceSnapshot::pair)
+            .doesNotContain("EURUSD")
+            .contains("USDJPY", "EURJPY");
+    }
+
+    @Test
+    void currentSnapshots_returnsCorrectFields() {
+        var feed = feedWith(
+            "EURUSD", 1.0800, 1.0801,
+            "USDJPY", 150.00, 150.01,
+            "EURJPY", 161.50, 161.90
+        );
+
+        var snapshots = engine(feed).currentSnapshots();
+
+        assertThat(snapshots).hasSize(3);
+        var eur = snapshots.stream()
+            .filter(s -> "EURUSD".equals(s.pair())).findFirst().orElseThrow();
+        assertThat(eur.exchange()).isEqualTo("KRAKEN");
+        assertThat(eur.bid()).isEqualTo(1.0800);
+        assertThat(eur.ask()).isEqualTo(1.0801);
+    }
+
+    @Test
+    void currentSnapshots_deduplicatesPairsSharedByMultipleTriangles() {
+        var tri1 = cfg("EURUSD", "USDJPY", "EURJPY");
+        var tri2 = cfg("EURUSD", "USDTRY", "EURTRY");  // EURUSD shared with tri1
+
+        var repo = mock(TriangleConfigRepository.class);
+        when(repo.findAll()).thenReturn(List.of(tri1, tri2));
+        when(repo.findByStatus("ACTIVE")).thenReturn(List.of(tri1, tri2));
+
+        var feed = mock(OrderBookFeed.class);
+        when(feed.getExchange()).thenReturn(Exchange.KRAKEN);
+        when(feed.getSnapshot("EURUSD")).thenReturn(new OrderBook("EURUSD", 1.08, 1.081));
+        when(feed.getSnapshot("USDJPY")).thenReturn(new OrderBook("USDJPY", 150.0, 150.01));
+        when(feed.getSnapshot("EURJPY")).thenReturn(new OrderBook("EURJPY", 161.5, 161.9));
+        when(feed.getSnapshot("USDTRY")).thenReturn(new OrderBook("USDTRY", 38.5, 38.6));
+        when(feed.getSnapshot("EURTRY")).thenReturn(new OrderBook("EURTRY", 41.5, 41.6));
+
+        var snapshots = engine(repo, feed).currentSnapshots();
+
+        // EURUSD appears only once despite being in two triangles
+        assertThat(snapshots.stream().filter(s -> "EURUSD".equals(s.pair())).count()).isEqualTo(1);
+        assertThat(snapshots).hasSize(5); // EURUSD, USDJPY, EURJPY, USDTRY, EURTRY
     }
 }

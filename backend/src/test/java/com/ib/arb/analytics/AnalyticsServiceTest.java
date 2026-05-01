@@ -29,6 +29,26 @@ class AnalyticsServiceTest {
         return t;
     }
 
+    // ── dailyProfitAndLoss ────────────────────────────────────────────────────
+
+    @Test
+    void dailyPnl_returnsZero_whenNoTrades() {
+        when(tradeRepo.sumPnlSince(any())).thenReturn(null);
+        assertThat(analytics.dailyProfitAndLoss()).isEqualTo(0.0);
+    }
+
+    @Test
+    void dailyPnl_returnsRepoSum() {
+        when(tradeRepo.sumPnlSince(any())).thenReturn(42.50);
+        assertThat(analytics.dailyProfitAndLoss()).isEqualTo(42.50);
+    }
+
+    @Test
+    void dailyPnl_returnsNegativeSum() {
+        when(tradeRepo.sumPnlSince(any())).thenReturn(-123.75);
+        assertThat(analytics.dailyProfitAndLoss()).isEqualTo(-123.75);
+    }
+
     // ── maxDrawdown ───────────────────────────────────────────────────────────
 
     @Test
