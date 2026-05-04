@@ -74,6 +74,8 @@ class AutoTraderTest {
         when(tradeRepo.findTop20ByOrderByTimeDesc()).thenReturn(List.of());
         when(analytics.dailyProfitAndLoss()).thenReturn(0.0);
         when(broker.isConnected()).thenReturn(true);
+        when(risk.checkProfit(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+            .thenReturn(RiskService.RiskResult.ok());
         when(tradeRepo.save(any())).thenAnswer(inv -> {
             var t = (Trade) inv.getArgument(0);
             ReflectionTestUtils.setField(t, "id", 1L);
@@ -489,6 +491,44 @@ class AutoTraderTest {
         var result = autoTrader.executeTrade(TRI, "A", MANUAL_LEGS);
 
         assertThat(result.status()).isEqualTo("SIMULATION");
+    }
+
+    // ── profit threshold gate ─────────────────────────────────────────────────
+
+    @Test
+    void attemptArbitrage_rejected_whenProfitBelowThreshold() {
+        // signal profit (0.0001) is below TRI.minProfitPercent (0.00025)
+        TRI.setMinProfitPercent(0.00025);
+        var lowProfitSignal = new Signal(Exchange.KRAKEN, TRI, "A", 0.0001);
+
+        when(broker.openOrderCount()).thenReturn(0);
+        when(broker.isSimulation()).thenReturn(true);
+        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(lowProfitSignal));
+        when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
+        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.checkProfit(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+            .thenReturn(RiskService.RiskResult.block("below minimum"));
+
+        autoTrader.attemptArbitrage();
+
+        assertThat(autoTrader.getStats().missed()).isEqualTo(1);
+        verify(broker, never()).placeComboOrder(any(), anyDouble());
+        verify(broker, never()).computeLegs(any(), anyDouble());
+    }
+
+    @Test
+    void manualTrade_rejected_whenProfitBelowThreshold() {
+        TRI.setMinProfitPercent(0.00025);
+        when(broker.openOrderCount()).thenReturn(0);
+        when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
+        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.checkProfit(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+            .thenReturn(RiskService.RiskResult.block("below minimum"));
+
+        var result = autoTrader.executeTrade(TRI, "A", MANUAL_LEGS);
+
+        assertThat(result.status()).isEqualTo("REJECTED_PROFIT");
+        verify(tradeRepo, never()).save(any());
     }
 
     // ── cooldown gate ─────────────────────────────────────────────────────────

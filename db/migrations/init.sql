@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS "users" (
 );
 
 INSERT INTO "settings" ("key", "value") VALUES
-    ('position_limit',  50000),
+    ('position_limit',  10000),
     ('max_daily_loss',  -1000),
     ('simulation_mode', 1)
 ON CONFLICT ("key") DO NOTHING;
@@ -52,8 +52,8 @@ CREATE TABLE IF NOT EXISTS "triangles" (
     "pair1"              TEXT             NOT NULL,
     "pair2"              TEXT             NOT NULL,
     "pair3"              TEXT             NOT NULL,
-    "min_profit_usd"     DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "min_profit_percent" DOUBLE PRECISION NOT NULL DEFAULT 0.00025,
+    "min_profit_usd"     DOUBLE PRECISION NOT NULL DEFAULT 10,
+    "min_profit_percent" DOUBLE PRECISION NOT NULL DEFAULT 0.01,
     "status"             TEXT             NOT NULL DEFAULT 'ACTIVE',
     "hits"               BIGINT           NOT NULL DEFAULT 0,
     "total_profit_usd"   DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -64,11 +64,11 @@ CREATE TABLE IF NOT EXISTS "triangles" (
 -- 7 triangles using only Kraken-supported FX spot pairs
 -- Supported: AUD/JPY AUD/USD EUR/AUD EUR/CAD EUR/CHF EUR/GBP EUR/JPY EUR/USD GBP/USD USD/CAD USD/CHF USD/JPY
 INSERT INTO "triangles" ("exchange","pair1","pair2","pair3","min_profit_usd","min_profit_percent","status","hits","total_profit_usd") VALUES
-    ('KRAKEN','EURUSD','USDJPY','EURJPY', 0,0.00025,'ACTIVE',0,0),
-    ('KRAKEN','EURUSD','USDCHF','EURCHF', 0,0.00025,'ACTIVE',0,0),
-    ('KRAKEN','EURGBP','GBPUSD','EURUSD', 0,0.00025,'ACTIVE',0,0),
-    ('KRAKEN','AUDUSD','USDJPY','AUDJPY', 0,0.00025,'ACTIVE',0,0),
-    ('KRAKEN','EURUSD','USDCAD','EURCAD', 0,0.00025,'ACTIVE',0,0),
-    ('KRAKEN','EURAUD','AUDUSD','EURUSD', 0,0.00025,'ACTIVE',0,0),
-    ('KRAKEN','EURAUD','AUDJPY','EURJPY', 0,0.00025,'ACTIVE',0,0)
+    ('KRAKEN','EURUSD','USDJPY','EURJPY', 10,0.01,'ACTIVE',0,0),
+    ('KRAKEN','EURUSD','USDCHF','EURCHF', 10,0.01,'ACTIVE',0,0),
+    ('KRAKEN','EURGBP','GBPUSD','EURUSD', 10,0.01,'ACTIVE',0,0),
+    ('KRAKEN','AUDUSD','USDJPY','AUDJPY', 10,0.01,'ACTIVE',0,0),
+    ('KRAKEN','EURUSD','USDCAD','EURCAD', 10,0.01,'ACTIVE',0,0),
+    ('KRAKEN','EURAUD','AUDUSD','EURUSD', 10,0.01,'ACTIVE',0,0),
+    ('KRAKEN','EURAUD','AUDJPY','EURJPY', 10,0.01,'ACTIVE',0,0)
 ON CONFLICT DO NOTHING;

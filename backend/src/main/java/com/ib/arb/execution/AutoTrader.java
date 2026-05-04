@@ -150,6 +150,15 @@ public class AutoTrader {
             return;
         }
 
+        var profitResult = risk.checkProfit(
+            s.config().getMinProfitPercent(), s.config().getMinProfitUsd(),
+            s.profit(), s.profit() * orderSizeUsd);
+        if (!profitResult.allowed()) {
+            missed++;
+            broadcast();
+            return;
+        }
+
         // Signal trade start — broadcast before placing orders so frontend shows the indicator
         if (!broker.isSimulation()) {
             executing = true;
@@ -202,7 +211,12 @@ public class AutoTrader {
         var exchange = Exchange.valueOf(config.getExchange().toUpperCase());
         // Derive notional size from leg 1 (price × volume) for balance and risk checks
         var leg1 = legs.get(0);
+        var leg2 = legs.get(1);
+        var leg3 = legs.get(2);
         var notional = leg1.price() * leg1.volume();
+        var edge = "A".equals(cycle)
+            ? leg1.price() * leg2.price() - leg3.price()
+            : leg3.price() - leg1.price() * leg2.price();
         var pair1 = config.getPair1();
         var spentCurrency = "A".equals(cycle) ? pair1.substring(3) : pair1.substring(0, 3);
         if (!positions.hasAvailableBalance(exchange, spentCurrency, notional))
@@ -211,6 +225,12 @@ public class AutoTrader {
         var riskResult = risk.check(notional);
         if (!riskResult.allowed())
             return new ManualTradeResult(-1, "REJECTED_RISK", 0.0);
+
+        var profitResult = risk.checkProfit(
+            config.getMinProfitPercent(), config.getMinProfitUsd(),
+            edge, edge * notional);
+        if (!profitResult.allowed())
+            return new ManualTradeResult(-1, "REJECTED_PROFIT", 0.0);
 
         if (!broker.isSimulation()) { executing = true; broadcast(); }
 
@@ -230,15 +250,16 @@ public class AutoTrader {
         lastTradeCompletedMs = System.currentTimeMillis();
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
-        var signal = new Signal(exchange, config, cycle, 0.0);
-        var trade = buildTrade(signal, legResults, latencyMs, 0.0, filled);
+        var estimatedPnl = filled ? edge * notional : 0.0;
+        var signal = new Signal(exchange, config, cycle, edge);
+        var trade = buildTrade(signal, legResults, latencyMs, estimatedPnl, filled);
         tradeRepo.save(trade);
 
-        if (filled) { executed++; triangleConfigRepo.incrementStats(config.getId(), 0.0); }
+        if (filled) { executed++; triangleConfigRepo.incrementStats(config.getId(), estimatedPnl); }
         else missed++;
 
         broadcast();
-        return new ManualTradeResult(trade.getId(), trade.getStatus(), 0.0);
+        return new ManualTradeResult(trade.getId(), trade.getStatus(), estimatedPnl);
     }
 
     public record ManualTradeResult(long tradeId, String status, double pnl) {}

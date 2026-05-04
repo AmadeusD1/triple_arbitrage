@@ -1,8 +1,8 @@
 import axios from 'axios';
 import type { AxiosResponse } from 'axios';
 import type {
-  ArbitrageStats, AuthUser, EquityPoint, ExecutionStats,
-  ManualLeg, Setting, Trade, TradeDetail, TriangleConfig,
+  ArbitrageStats, AuthUser, BalanceEntry, EquityPoint, ExecutionStats,
+  ManualLeg, OpenOrder, Setting, Trade, TradeDetail, TriangleConfig,
 } from '../types';
 
 const client = axios.create({ baseURL: '/api' });
@@ -45,6 +45,8 @@ export const getTrade              = (id: number): Promise<AxiosResponse<TradeDe
 export const getSettings           = (): Promise<AxiosResponse<Setting[]>>          => client.get('/settings');
 export const putSettings           = (data: Record<string, number>): Promise<AxiosResponse<void>> => client.put('/settings', data);
 export const getBrokerHealth       = (): Promise<AxiosResponse<BrokerHealth>>       => client.get('/broker/health');
+export const getPositions          = (): Promise<AxiosResponse<BalanceEntry[]>>     => client.get('/positions');
+export const getOpenOrders         = (): Promise<AxiosResponse<OpenOrder[]>>        => client.get('/orders/open');
 
 export const manualTrade = (triangleId: number, cycle: 'A' | 'B', legs: ManualLeg[]) =>
   client.post<{ tradeId: number; status: string; pnl: number }>('/arbitrage/manual-trade', { triangleId, cycle, legs });

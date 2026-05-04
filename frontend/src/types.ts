@@ -85,6 +85,25 @@ export interface ManualLeg {
   volume: number;
 }
 
+export interface BalanceEntry {
+  exchange: string;
+  currency: string;
+  krakenKey: string;
+  amount: number;
+}
+
+export interface OpenOrder {
+  txid: string;
+  pair: string;
+  side: string;
+  orderType: string;
+  price: number;
+  volume: number;
+  volumeFilled: number;
+  openTime: number;
+  status: string;
+}
+
 export type TriangleStatus = 'ACTIVE' | 'INACTIVE';
 
 export interface TriangleConfig {

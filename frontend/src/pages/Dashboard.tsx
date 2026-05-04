@@ -1,16 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-  Alert, Box, Button, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
-  Grid, IconButton, Paper, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, Typography,
+  Alert, Box, Button, Chip, Container, Grid, Paper, Typography,
 } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import type { ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import { useDashboardSocket } from '../hooks/useDashboardSocket';
-import { getDrawdown, getEquity, getExecution, getSharpe, getWinRate, getTrade, getStatus, startArbitrage, stopArbitrage } from '../api/rest';
-import type { AnalyticsData, ExecutionStats, EquityPoint, TradeDetail, LegStatus } from '../types';
+import { getDrawdown, getEquity, getExecution, getSharpe, getWinRate, getStatus, startArbitrage, stopArbitrage } from '../api/rest';
+import type { AnalyticsData, ExecutionStats, EquityPoint } from '../types';
 
 interface StatCardProps {
   label: string;
@@ -26,89 +23,11 @@ function StatCard({ label, children }: StatCardProps) {
   );
 }
 
-const LEG_STATUS_COLOR: Record<LegStatus, 'success' | 'error' | 'default'> = {
-  FILLED:    'success',
-  SIMULATED: 'success',
-  FAILED:    'error',
-};
-
-interface TradeDetailDialogProps {
-  tradeId: number | null;
-  onClose: () => void;
-}
-
-function TradeDetailDialog({ tradeId, onClose }: TradeDetailDialogProps) {
-  const [detail, setDetail] = useState<TradeDetail | null>(null);
-
-  useEffect(() => {
-    if (tradeId == null) return;
-    setDetail(null);
-    getTrade(tradeId).then((res) => setDetail(res.data));
-  }, [tradeId]);
-
-  return (
-    <Dialog open={tradeId != null} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        Trade #{tradeId} — Legs
-        <IconButton size="small" onClick={onClose}><CloseIcon fontSize="small" /></IconButton>
-      </DialogTitle>
-      <DialogContent>
-        {!detail ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress />
-          </Box>
-        ) : (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>#</TableCell>
-                  <TableCell>Pair</TableCell>
-                  <TableCell>Direction</TableCell>
-                  <TableCell align="right">Price</TableCell>
-                  <TableCell align="right">Volume</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell>Order ID</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {detail.legs.map((leg) => (
-                  <TableRow key={leg.legIndex}>
-                    <TableCell>{leg.legIndex}</TableCell>
-                    <TableCell>{leg.pair}</TableCell>
-                    <TableCell>
-                      <Chip
-                        label={leg.direction}
-                        color={leg.direction === 'BUY' ? 'success' : 'warning'}
-                        size="small"
-                        variant="outlined"
-                      />
-                    </TableCell>
-                    <TableCell align="right">{leg.price.toFixed(5)}</TableCell>
-                    <TableCell align="right">{leg.volume.toFixed(2)}</TableCell>
-                    <TableCell>
-                      <Chip label={leg.status} color={LEG_STATUS_COLOR[leg.status]} size="small" />
-                    </TableCell>
-                    <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'text.secondary' }}>
-                      {leg.orderId ?? '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export default function Dashboard() {
   const live = useDashboardSocket();
   const [analytics, setAnalytics] = useState<AnalyticsData>({ drawdown: 0, sharpe: 0, winRate: 0 });
   const [execution, setExecution] = useState<ExecutionStats>({ avgLatency: 0, maxLatency: 0, fillRate: 0 });
   const [equity, setEquity] = useState<EquityPoint[]>([]);
-  const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
@@ -139,7 +58,6 @@ export default function Dashboard() {
   const pnl       = live?.dailyProfitAndLoss ?? 0;
   const connected = live?.brokerConnected ?? false;
   const arb       = live?.arbStats ?? { detected: 0, executed: 0, missed: 0, avgEdge: 0 };
-  const trades    = live?.recentTrades ?? [];
 
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
@@ -253,66 +171,6 @@ export default function Dashboard() {
         </ResponsiveContainer>
       </Paper>
 
-      {/* Row 4: Recent trades */}
-      <Paper>
-        <Typography variant="subtitle1" sx={{ p: 2, pb: 1 }}>
-          Recent Trades{' '}
-          <Typography component="span" variant="caption" color="text.secondary">
-            — click a row for leg details
-          </Typography>
-        </Typography>
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Time</TableCell>
-                <TableCell>Dir</TableCell>
-                <TableCell align="right">Spread</TableCell>
-                <TableCell align="right">PnL</TableCell>
-                <TableCell align="right">Latency</TableCell>
-                <TableCell>Status</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {trades.map((t) => (
-                <TableRow
-                  key={t.id}
-                  hover
-                  sx={{ cursor: 'pointer' }}
-                  onClick={() => setSelectedTradeId(t.id)}
-                >
-                  <TableCell>{t.time.substring(0, 19).replace('T', ' ')}</TableCell>
-                  <TableCell>{t.direction}</TableCell>
-                  <TableCell align="right">{t.spread.toFixed(5)}</TableCell>
-                  <TableCell align="right" sx={{ color: t.pnl >= 0 ? 'success.main' : 'error.main' }}>
-                    ${t.pnl.toFixed(2)}
-                  </TableCell>
-                  <TableCell align="right">{t.latencyMs.toFixed(0)} ms</TableCell>
-                  <TableCell>
-                    <Chip
-                      label={t.status}
-                      color={t.status === 'FILLED' ? 'success' : t.status === 'SIMULATION' ? 'info' : 'default'}
-                      size="small"
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-              {trades.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 3, color: 'text.secondary' }}>
-                    No trades yet
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
-
-      <TradeDetailDialog
-        tradeId={selectedTradeId}
-        onClose={() => setSelectedTradeId(null)}
-      />
     </Container>
   );
 }

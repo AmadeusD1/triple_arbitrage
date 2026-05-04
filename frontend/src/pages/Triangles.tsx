@@ -17,7 +17,7 @@ type TrianglePayload = Omit<TriangleConfig, 'id' | 'hits' | 'totalProfitUsd'>;
 
 const EMPTY_FORM: TrianglePayload = {
   exchange: 'KRAKEN', pair1: '', pair2: '', pair3: '',
-  minProfitUsd: 0, minProfitPercent: 0.00025, status: 'ACTIVE',
+  minProfitUsd: 10, minProfitPercent: 0.01, status: 'ACTIVE',
 };
 
 interface SnackState { open: boolean; message: string; severity: 'success' | 'info' | 'error' }
@@ -39,33 +39,23 @@ export default function Triangles({ prices }: Props) {
 
   const [tradeTarget, setTradeTarget] = useState<TriangleConfig | null>(null);
   const [tradeCycle, setTradeCycle] = useState<'A' | 'B'>('A');
-  const [tradeSize, setTradeSize] = useState(10000);
   const [legs, setLegs] = useState<ManualLeg[]>([]);
   const [snack, setSnack] = useState<SnackState>({ open: false, message: '', severity: 'success' });
 
   const load = () => getTriangles().then((res) => setTriangles(res.data));
   useEffect(() => { void load(); }, []);
 
+  const DEFAULT_SIZE = 10_000;
+
   const openTradeDialog = (t: TriangleConfig) => {
     setTradeTarget(t);
     setTradeCycle('A');
-    setTradeSize(10000);
-    setLegs(computeLegs(t, 'A', 10000, prices));
+    setLegs(computeLegs(t, 'A', DEFAULT_SIZE, prices));
   };
 
-  // Recompute legs when cycle changes (prices stay, volumes recalculate)
   const handleCycleChange = (cycle: 'A' | 'B') => {
     setTradeCycle(cycle);
-    if (tradeTarget) setLegs(computeLegs(tradeTarget, cycle, tradeSize, prices));
-  };
-
-  // When order size changes, recalculate volumes using each leg's current price
-  const handleSizeChange = (size: number) => {
-    setTradeSize(size);
-    setLegs(prev => prev.map(l => ({
-      ...l,
-      volume: l.price > 0 ? size / l.price : 0,
-    })));
+    if (tradeTarget) setLegs(computeLegs(tradeTarget, cycle, DEFAULT_SIZE, prices));
   };
 
   const updateLeg = (index: number, field: 'price' | 'volume', value: number) => {
@@ -190,17 +180,11 @@ export default function Triangles({ prices }: Props) {
         <DialogTitle>Manual Trade — {tradeTarget?.pair1} / {tradeTarget?.pair2} / {tradeTarget?.pair3}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-            {/* Cycle + seed size row */}
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-              <ToggleButtonGroup value={tradeCycle} exclusive size="small"
-                onChange={(_, v) => { if (v) handleCycleChange(v as 'A' | 'B'); }}>
-                <ToggleButton value="A">Cycle A</ToggleButton>
-                <ToggleButton value="B">Cycle B</ToggleButton>
-              </ToggleButtonGroup>
-              <TextField label="Seed size (USD)" type="number" size="small" sx={{ flex: 1 }}
-                value={tradeSize} onChange={(e) => handleSizeChange(Number(e.target.value))}
-                helperText="Used to pre-fill volumes — edit each leg directly" />
-            </Box>
+            <ToggleButtonGroup value={tradeCycle} exclusive size="small"
+              onChange={(_, v) => { if (v) handleCycleChange(v as 'A' | 'B'); }}>
+              <ToggleButton value="A">Cycle A</ToggleButton>
+              <ToggleButton value="B">Cycle B</ToggleButton>
+            </ToggleButtonGroup>
 
             {/* Per-leg table */}
             <Table size="small">

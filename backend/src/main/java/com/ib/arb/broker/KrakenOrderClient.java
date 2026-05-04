@@ -7,20 +7,13 @@ import com.ib.arb.scanner.Signal;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -232,8 +225,8 @@ public class KrakenOrderClient {
             params.put("price", String.format("%.5f", price));
             params.put("volume", String.format("%.5f", volume));
 
-            var postData = encodeForm(params);
-            var signature = sign(ADD_ORDER_PATH, nonce, postData);
+            var postData = KrakenAuth.encodeForm(params);
+            var signature = KrakenAuth.sign(ADD_ORDER_PATH, nonce, postData, apiSecret);
 
             var request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + ADD_ORDER_PATH))
@@ -254,25 +247,4 @@ public class KrakenOrderClient {
         }
     }
 
-    // Kraken signature: Base64(HMAC-SHA512(Base64Decode(secret), path + SHA256(nonce + postData)))
-    private String sign(String path, String nonce, String postData) throws Exception {
-        var sha256 = MessageDigest.getInstance("SHA-256");
-        var sha256Hash = sha256.digest((nonce + postData).getBytes(StandardCharsets.UTF_8));
-
-        var mac = Mac.getInstance("HmacSHA512");
-        mac.init(new SecretKeySpec(Base64.getDecoder().decode(apiSecret), "HmacSHA512"));
-        mac.update(path.getBytes(StandardCharsets.UTF_8));
-        return Base64.getEncoder().encodeToString(mac.doFinal(sha256Hash));
-    }
-
-    private String encodeForm(Map<String, String> params) {
-        var sb = new StringBuilder();
-        params.forEach((k, v) -> {
-            if (!sb.isEmpty()) sb.append('&');
-            sb.append(URLEncoder.encode(k, StandardCharsets.UTF_8))
-              .append('=')
-              .append(URLEncoder.encode(v, StandardCharsets.UTF_8));
-        });
-        return sb.toString();
-    }
 }

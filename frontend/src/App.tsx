@@ -3,13 +3,16 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { useDashboardSocket } from './hooks/useDashboardSocket';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
+import OpenOrders from './pages/OpenOrders';
+import Positions from './pages/Positions';
 import Prices from './pages/Prices';
 import Settings from './pages/Settings';
+import Trades from './pages/Trades';
 import Triangles from './pages/Triangles';
 
 const theme = createTheme({ palette: { mode: 'dark' } });
 
-const PAGES = ['/', '/prices', '/settings', '/triangles'] as const;
+const PAGES = ['/', '/trades', '/positions', '/open-orders', '/prices', '/settings', '/triangles'] as const;
 
 function NavBar() {
   const path = window.location.pathname;
@@ -37,12 +40,20 @@ function NavBar() {
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
+        {/* Left: primary navigation */}
         {nav('/', 'Dashboard')}
-        {nav('/prices', 'Prices')}
-        {nav('/settings', 'Settings')}
-        {nav('/triangles', 'Triangles')}
+        {nav('/trades', 'Trades')}
+        {nav('/positions', 'Positions')}
+        {nav('/open-orders', 'Open Orders')}
+
         <Box sx={{ flex: 1 }} />
-        <Box sx={{ color: 'text.secondary', fontSize: '0.8rem', mr: 1 }}>{user?.username}</Box>
+
+        {/* Right: config / data views */}
+        {nav('/prices', 'Feeds')}
+        {nav('/triangles', 'Exchange Settings')}
+        {nav('/settings', 'Settings')}
+
+        <Box sx={{ color: 'text.secondary', fontSize: '0.8rem', mr: 1, ml: 1 }}>{user?.username}</Box>
         <Button size="small" color="inherit" onClick={() => void logout()}>Logout</Button>
       </Box>
     </Box>
@@ -68,10 +79,14 @@ function AppRoutes() {
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <NavBar />
       <Box component="main" sx={{ flex: 1 }}>
-        {path === '/prices'    && <Prices prices={live?.prices ?? []} />}
-        {path === '/settings'  && <Settings />}
-        {path === '/triangles' && <Triangles prices={live?.prices ?? []} />}
-        {path !== '/prices' && path !== '/settings' && path !== '/triangles' && <Dashboard />}
+        {path === '/trades'       && <Trades      trades={live?.recentTrades ?? []} />}
+        {path === '/positions'    && <Positions />}
+        {path === '/open-orders'  && <OpenOrders />}
+        {path === '/prices'       && <Prices      prices={live?.prices ?? []} />}
+        {path === '/settings'     && <Settings />}
+        {path === '/triangles'    && <Triangles   prices={live?.prices ?? []} />}
+        {path !== '/trades' && path !== '/positions' && path !== '/open-orders' &&
+         path !== '/prices' && path !== '/settings'  && path !== '/triangles' && <Dashboard />}
       </Box>
     </Box>
   );

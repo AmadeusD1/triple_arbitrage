@@ -22,6 +22,12 @@ import java.time.LocalDateTime;
 @Service
 public class RiskService {
 
+    private static final String KEY_POSITION_LIMIT = "position_limit";
+    private static final String KEY_MAX_DAILY_LOSS  = "max_daily_loss";
+
+    private static final double DEFAULT_POSITION_LIMIT =  10_000.0;
+    private static final double DEFAULT_MAX_DAILY_LOSS  = -1_000.0;
+
     private final SettingRepository settings;
     private final TradeRepository trades;
 
@@ -42,8 +48,8 @@ public class RiskService {
      *         {@link RiskResult#block(String)} with a human-readable reason if any check fails
      */
     public RiskResult check(double orderSize) {
-        var posLimit = getSetting("position_limit", 50_000.0);
-        var maxDailyLoss = getSetting("max_daily_loss", -1_000.0);
+        var posLimit = getSetting(KEY_POSITION_LIMIT, DEFAULT_POSITION_LIMIT);
+        var maxDailyLoss = getSetting(KEY_MAX_DAILY_LOSS, DEFAULT_MAX_DAILY_LOSS);
 
         if (orderSize > posLimit) return RiskResult.block("Position limit exceeded");
 
@@ -58,6 +64,25 @@ public class RiskService {
         return settings.findById(key)
             .map(s -> s.getValue())
             .orElse(defaultValue);
+    }
+
+    /**
+     * Validates estimated profit against a triangle's per-configured thresholds.
+     *
+     * @param minProfitPercent minimum edge percentage required (from {@code TriangleConfig})
+     * @param minProfitUsd     minimum profit in USD required; skipped when {@code 0}
+     * @param edgePercent      computed edge for this signal or manual trade
+     * @param estimatedProfitUsd estimated profit in USD ({@code edgePercent × notional})
+     */
+    public RiskResult checkProfit(double minProfitPercent, double minProfitUsd,
+                                   double edgePercent, double estimatedProfitUsd) {
+        if (edgePercent < minProfitPercent)
+            return RiskResult.block("Edge %.5f below minimum %.5f"
+                .formatted(edgePercent, minProfitPercent));
+        if (minProfitUsd > 0 && estimatedProfitUsd < minProfitUsd)
+            return RiskResult.block("Estimated profit $%.2f below minimum $%.2f"
+                .formatted(estimatedProfitUsd, minProfitUsd));
+        return RiskResult.ok();
     }
 
     /**

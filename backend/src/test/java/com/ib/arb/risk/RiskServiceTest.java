@@ -50,9 +50,9 @@ class RiskServiceTest {
         when(settings.findById(eq("max_daily_loss"))).thenReturn(Optional.empty());
         when(trades.sumPnlSince(any())).thenReturn(0.0);
 
-        // default limit is 50_000
-        assertThat(riskService.check(49_000.0).allowed()).isTrue();
-        assertThat(riskService.check(51_000.0).allowed()).isFalse();
+        // default limit is 10_000
+        assertThat(riskService.check(9_000.0).allowed()).isTrue();
+        assertThat(riskService.check(11_000.0).allowed()).isFalse();
     }
 
     @Test
@@ -62,6 +62,59 @@ class RiskServiceTest {
 
         // exactly at the limit — should pass (condition is strictly greater-than)
         assertThat(riskService.check(100_000.0).allowed()).isTrue();
+    }
+
+    // ── checkProfit ───────────────────────────────────────────────────────────
+
+    @Test
+    void checkProfit_allows_whenBothThresholdsMet() {
+        assertThat(riskService.checkProfit(0.01, 10.0, 0.02, 100.0).allowed()).isTrue();
+    }
+
+    @Test
+    void checkProfit_blocks_whenEdgeBelowMinPercent() {
+        var result = riskService.checkProfit(0.01, 10.0, 0.005, 50.0);
+        assertThat(result.allowed()).isFalse();
+        assertThat(result.reason()).contains("below minimum");
+    }
+
+    @Test
+    void checkProfit_blocks_whenUsdBelowMinUsd() {
+        var result = riskService.checkProfit(0.01, 10.0, 0.02, 5.0);
+        assertThat(result.allowed()).isFalse();
+        assertThat(result.reason()).contains("$10");
+    }
+
+    @Test
+    void checkProfit_allows_whenMinUsdIsZero() {
+        // minProfitUsd=0 means no USD floor — edge check only
+        assertThat(riskService.checkProfit(0.01, 0.0, 0.02, 0.01).allowed()).isTrue();
+    }
+
+    @Test
+    void checkProfit_allows_whenEdgeExactlyAtMinPercent() {
+        // condition is strict <, so equal threshold passes
+        assertThat(riskService.checkProfit(0.01, 0.0, 0.01, 100.0).allowed()).isTrue();
+    }
+
+    @Test
+    void checkProfit_allows_whenUsdExactlyAtMinUsd() {
+        // condition is strict <, so equal threshold passes
+        assertThat(riskService.checkProfit(0.01, 10.0, 0.02, 10.0).allowed()).isTrue();
+    }
+
+    @Test
+    void checkProfit_blocks_onPercent_beforeCheckingUsd() {
+        // edge fails first — USD should never be evaluated
+        var result = riskService.checkProfit(0.01, 10.0, 0.005, 100.0);
+        assertThat(result.allowed()).isFalse();
+        assertThat(result.reason()).contains("below minimum");
+    }
+
+    @Test
+    void checkProfit_blocks_whenEdgeNegative() {
+        var result = riskService.checkProfit(0.01, 10.0, -0.001, -10.0);
+        assertThat(result.allowed()).isFalse();
     }
 
     // ── daily loss ────────────────────────────────────────────────────────────
