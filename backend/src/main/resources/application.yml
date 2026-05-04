@@ -17,8 +17,10 @@ arb:
 
 kraken:
   ws-url: wss://ws.kraken.com/v2
-  api-key: 2+xhOGxgWPDLgDyenaoOkabb79c0sTtu02FNPIpphOKZzZe209Le+NKYDPm5pfLMHy66DCnA5QeuWGXqSawzyA== #${KRAKEN_API_KEY:}
-  api-secret: CuUXlJ6bnW9iHEEiHvJiJ+1e+vkEPj7igCAbqM4UyOI4NqvCel+2aI4f #${KRAKEN_API_SECRET:}
+  api-key: CuUXlJ6bnW9iHEEiHvJiJ+1e+vkEPj7igCAbqM4UyOI4NqvCel+2aI4f
+  #${KRAKEN_API_KEY:}
+  api-secret: 2+xhOGxgWPDLgDyenaoOkabb79c0sTtu02FNPIpphOKZzZe209Le+NKYDPm5pfLMHy66DCnA5QeuWGXqSawzyA==
+  #${KRAKEN_API_SECRET:}
   position-cache-ttl-ms: 2000
 
 alert:
