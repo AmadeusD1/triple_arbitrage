@@ -133,11 +133,7 @@ public class AutoTrader {
         var s = signal.get();
         totalEdge += s.profit();
 
-        var pair1 = s.config().getPair1();
-        var spentCurrency = "A".equals(s.cycle())
-            ? pair1.substring(3)
-            : pair1.substring(0, 3);
-        if (!positions.hasAvailableBalance(s.exchange(), spentCurrency, orderSizeUsd)) {
+        if (!hasBalanceForAllLegs(s.exchange(), s.config(), s.cycle(), orderSizeUsd)) {
             missed++;
             broadcast();
             return;
@@ -217,9 +213,7 @@ public class AutoTrader {
         var edge = "A".equals(cycle)
             ? leg1.price() * leg2.price() - leg3.price()
             : leg3.price() - leg1.price() * leg2.price();
-        var pair1 = config.getPair1();
-        var spentCurrency = "A".equals(cycle) ? pair1.substring(3) : pair1.substring(0, 3);
-        if (!positions.hasAvailableBalance(exchange, spentCurrency, notional))
+        if (!hasBalanceForAllLegs(exchange, config, cycle, notional))
             return new ManualTradeResult(-1, "REJECTED_BALANCE", 0.0);
 
         var riskResult = risk.check(notional);
@@ -263,6 +257,36 @@ public class AutoTrader {
     }
 
     public record ManualTradeResult(long tradeId, String status, double pnl) {}
+
+    private boolean hasBalanceForAllLegs(Exchange exchange, TriangleConfig config,
+                                          String cycle, double orderSize) {
+        var cycleA = "A".equals(cycle);
+        var pairs = new String[]{ config.getPair1(), config.getPair2(), config.getPair3() };
+        var dirs  = cycleA
+            ? new String[]{ "BUY", "BUY", "SELL" }
+            : new String[]{ "SELL", "SELL", "BUY" };
+
+        var snapshots = arbitrageEngine.currentSnapshots();
+
+        for (int i = 0; i < 3; i++) {
+            var pair  = pairs[i];
+            var isBuy = "BUY".equals(dirs[i]);
+            var ccy   = isBuy ? pair.substring(3) : pair.substring(0, 3);
+
+            var price = snapshots.stream()
+                .filter(p -> exchange.name().equals(p.exchange()) && pair.equals(p.pair()))
+                .findFirst()
+                .map(snap -> isBuy ? snap.ask() : snap.bid())
+                .orElse(0.0);
+
+            if (price == 0.0) return false;
+
+            var required = isBuy ? orderSize : orderSize / price;
+
+            if (!positions.hasAvailableBalance(exchange, ccy, required)) return false;
+        }
+        return true;
+    }
 
     private Trade buildTrade(Signal signal, List<LegResult> legResults,
                              long latencyMs, double estimatedPnl, boolean filled) {

@@ -6,6 +6,7 @@ import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.broker.KrakenOrderClient.LegResult;
 import com.ib.arb.config.DashboardWebSocketHandler;
 import com.ib.arb.marketdata.Exchange;
+import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TriangleConfig;
 import com.ib.arb.position.PositionService;
@@ -74,6 +75,11 @@ class AutoTraderTest {
         when(tradeRepo.findTop20ByOrderByTimeDesc()).thenReturn(List.of());
         when(analytics.dailyProfitAndLoss()).thenReturn(0.0);
         when(broker.isConnected()).thenReturn(true);
+        when(arbitrageEngine.currentSnapshots()).thenReturn(List.of(
+            new PriceSnapshot("KRAKEN", "EURUSD", 1.0800, 1.0801),
+            new PriceSnapshot("KRAKEN", "USDJPY", 150.00, 150.01),
+            new PriceSnapshot("KRAKEN", "EURJPY", 162.00, 162.10)
+        ));
         when(risk.checkProfit(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
             .thenReturn(RiskService.RiskResult.ok());
         when(tradeRepo.save(any())).thenAnswer(inv -> {
@@ -288,7 +294,8 @@ class AutoTraderTest {
 
         autoTrader.attemptArbitrage();
 
-        verify(positions).hasAvailableBalance(Exchange.KRAKEN, "EUR", 100_000.0);
+        // Cycle B leg1 = SELL EURUSD → ccy=EUR, required = orderSizeUsd / bid_EURUSD
+        verify(positions).hasAvailableBalance(eq(Exchange.KRAKEN), eq("EUR"), anyDouble());
     }
 
     // ── executeTrade (manual) — early rejections ──────────────────────────────
