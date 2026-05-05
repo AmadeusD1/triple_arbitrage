@@ -1,5 +1,6 @@
 package com.ib.arb.api;
 
+import com.ib.arb.model.User;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.http.ResponseEntity;
@@ -37,7 +38,8 @@ public class AuthController {
         session.setAttribute(
             HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, ctx);
 
-        return ResponseEntity.ok(Map.of("username", auth.getName()));
+        var user = (User) auth.getPrincipal();
+        return ResponseEntity.ok(Map.of("username", user.getUsername(), "role", user.getRole()));
     }
 
     @PostMapping("/logout")
@@ -53,6 +55,9 @@ public class AuthController {
         if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
             return ResponseEntity.status(401).build();
         }
-        return ResponseEntity.ok(Map.of("username", auth.getName()));
+        if (auth.getPrincipal() instanceof User user) {
+            return ResponseEntity.ok(Map.of("username", user.getUsername(), "role", user.getRole()));
+        }
+        return ResponseEntity.status(401).build();
     }
 }

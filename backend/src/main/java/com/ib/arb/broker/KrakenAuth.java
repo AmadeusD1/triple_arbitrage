@@ -7,11 +7,20 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Kraken HMAC-SHA512 request signing shared by order and position clients. */
 public final class KrakenAuth {
 
+    /** Shared monotonically increasing nonce counter — all callers use the same API key. */
+    private static final AtomicLong NONCE = new AtomicLong(System.currentTimeMillis());
+
     private KrakenAuth() {}
+
+    /** Returns the next nonce, guaranteed strictly greater than the previous call. */
+    public static String nextNonce() {
+        return String.valueOf(NONCE.incrementAndGet());
+    }
 
     /**
      * Signs a Kraken private API request.

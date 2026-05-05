@@ -38,7 +38,7 @@ public class KrakenPositionClient implements PositionClient {
     @Override
     public Map<String, Double> fetchBalances() {
         try {
-            var nonce = String.valueOf(System.currentTimeMillis());
+            var nonce = KrakenAuth.nextNonce();
             var body  = "nonce=" + nonce;
             var root  = mapper.readTree(send("/0/private/Balance", nonce, body));
 
@@ -64,7 +64,7 @@ public class KrakenPositionClient implements PositionClient {
     @Override
     public List<OpenOrder> fetchOpenOrders() {
         try {
-            var nonce = String.valueOf(System.currentTimeMillis());
+            var nonce = KrakenAuth.nextNonce();
             var body  = "nonce=" + nonce;
             var root  = mapper.readTree(send("/0/private/OpenOrders", nonce, body));
 

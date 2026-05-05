@@ -34,8 +34,9 @@ CREATE TABLE IF NOT EXISTS "settings" (
 
 CREATE TABLE IF NOT EXISTS "users" (
     "id"       BIGSERIAL NOT NULL,
-    "username" TEXT NOT NULL UNIQUE,
-    "password" TEXT NOT NULL,
+    "username" TEXT      NOT NULL UNIQUE,
+    "password" TEXT,
+    "role"     TEXT      NOT NULL DEFAULT 'USER',
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );

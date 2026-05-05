@@ -42,6 +42,7 @@ public class DataInitializer implements ApplicationRunner {
             var user = new User();
             user.setUsername(adminUsername);
             user.setPassword(passwordEncoder.encode(adminPassword));
+            user.setRole("ADMIN");
             userRepo.save(user);
             log.info("Created admin user '{}'", adminUsername);
         }

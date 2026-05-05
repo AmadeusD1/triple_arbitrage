@@ -75,6 +75,13 @@ export interface AnalyticsData {
 
 export interface AuthUser {
   username: string;
+  role: string;
+}
+
+export interface AppUser {
+  id: number;
+  username: string;
+  role: string;
 }
 
 export interface ManualLeg {

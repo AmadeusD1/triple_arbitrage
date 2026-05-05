@@ -9,10 +9,11 @@ import Prices from './pages/Prices';
 import Settings from './pages/Settings';
 import Trades from './pages/Trades';
 import Triangles from './pages/Triangles';
+import Users from './pages/Users';
 
 const theme = createTheme({ palette: { mode: 'dark' } });
 
-const PAGES = ['/', '/trades', '/positions', '/open-orders', '/prices', '/settings', '/triangles'] as const;
+const PAGES = ['/', '/trades', '/positions', '/open-orders', '/prices', '/settings', '/triangles', '/users'] as const;
 
 function NavBar() {
   const path = window.location.pathname;
@@ -52,6 +53,7 @@ function NavBar() {
         {nav('/prices', 'Feeds')}
         {nav('/triangles', 'Exchange Settings')}
         {nav('/settings', 'Settings')}
+        {user?.role === 'ADMIN' && nav('/users', 'Users')}
 
         <Box sx={{ color: 'text.secondary', fontSize: '0.8rem', mr: 1, ml: 1 }}>{user?.username}</Box>
         <Button size="small" color="inherit" onClick={() => void logout()}>Logout</Button>
@@ -85,8 +87,10 @@ function AppRoutes() {
         {path === '/prices'       && <Prices      prices={live?.prices ?? []} />}
         {path === '/settings'     && <Settings />}
         {path === '/triangles'    && <Triangles   prices={live?.prices ?? []} />}
+        {path === '/users'        && user.role === 'ADMIN' && <Users />}
         {path !== '/trades' && path !== '/positions' && path !== '/open-orders' &&
-         path !== '/prices' && path !== '/settings'  && path !== '/triangles' && <Dashboard />}
+         path !== '/prices' && path !== '/settings'  && path !== '/triangles' &&
+         path !== '/users'  && <Dashboard />}
       </Box>
     </Box>
   );

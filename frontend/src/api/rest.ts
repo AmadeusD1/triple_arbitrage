@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { AxiosResponse } from 'axios';
 import type {
-  ArbitrageStats, AuthUser, BalanceEntry, EquityPoint, ExecutionStats,
+  AppUser, ArbitrageStats, AuthUser, BalanceEntry, EquityPoint, ExecutionStats,
   ManualLeg, OpenOrder, Setting, Trade, TradeDetail, TriangleConfig,
 } from '../types';
 
@@ -56,3 +56,7 @@ export const getTriangles    = (): Promise<AxiosResponse<TriangleConfig[]>>     
 export const createTriangle  = (data: TrianglePayload): Promise<AxiosResponse<TriangleConfig>> => client.post('/triangles', data);
 export const updateTriangle  = (id: number, data: TrianglePayload): Promise<AxiosResponse<TriangleConfig>> => client.put(`/triangles/${id}`, data);
 export const deleteTriangle  = (id: number): Promise<AxiosResponse<void>>            => client.delete(`/triangles/${id}`);
+
+export const getUsers   = ():                                            Promise<AxiosResponse<AppUser[]>> => client.get('/users');
+export const createUser = (username: string, password: string):         Promise<AxiosResponse<AppUser>>   => client.post('/users', { username, password });
+export const deleteUser = (id: number):                                  Promise<AxiosResponse<void>>      => client.delete(`/users/${id}`);

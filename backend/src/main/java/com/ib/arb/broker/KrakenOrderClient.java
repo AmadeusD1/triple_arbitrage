@@ -216,7 +216,7 @@ public class KrakenOrderClient {
     /** Submits one limit order to Kraken and returns the txid on success, or empty on any failure. */
     private Optional<String> addOrder(String pair, String type, double price, double volume) {
         try {
-            var nonce = String.valueOf(System.currentTimeMillis());
+            var nonce = KrakenAuth.nextNonce();
             var params = new LinkedHashMap<String, String>();
             params.put("nonce", nonce);
             params.put("ordertype", "limit");
