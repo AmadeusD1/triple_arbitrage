@@ -26,21 +26,23 @@ public class Trade {
 
     public Long getId() { return id; }
     public LocalDateTime getTime() { return time; }
-    public void setTime(LocalDateTime time) { this.time = time; }
     public String getDirection() { return direction; }
-    public void setDirection(String direction) { this.direction = direction; }
     public double getSpread() { return spread; }
-    public void setSpread(double spread) { this.spread = spread; }
     public double getPnl() { return pnl; }
-    public void setPnl(double pnl) { this.pnl = pnl; }
     public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
     public double getLatencyMs() { return latencyMs; }
-    public void setLatencyMs(double latencyMs) { this.latencyMs = latencyMs; }
     @JsonIgnore public List<TradeLeg> getLegs() { return legs; }
 
-    public void addLeg(TradeLeg leg) {
+    public Trade setTime(LocalDateTime time)       { this.time = time;           return this; }
+    public Trade setDirection(String direction)    { this.direction = direction; return this; }
+    public Trade setSpread(double spread)          { this.spread = spread;       return this; }
+    public Trade setPnl(double pnl)               { this.pnl = pnl;             return this; }
+    public Trade setStatus(String status)          { this.status = status;       return this; }
+    public Trade setLatencyMs(double latencyMs)    { this.latencyMs = latencyMs; return this; }
+
+    public Trade addLeg(TradeLeg leg) {
         legs.add(leg);
         leg.setTrade(this);
+        return this;
     }
 }

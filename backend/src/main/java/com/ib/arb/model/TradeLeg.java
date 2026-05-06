@@ -25,20 +25,21 @@ public class TradeLeg {
     private String orderId;
 
     public Long getId() { return id; }
-    @JsonIgnore public Trade getTrade() { return trade; }
-    public void setTrade(Trade trade) { this.trade = trade; }
     public int getLegIndex() { return legIndex; }
-    public void setLegIndex(int legIndex) { this.legIndex = legIndex; }
     public String getPair() { return pair; }
-    public void setPair(String pair) { this.pair = pair; }
     public String getDirection() { return direction; }
-    public void setDirection(String direction) { this.direction = direction; }
     public double getPrice() { return price; }
-    public void setPrice(double price) { this.price = price; }
     public double getVolume() { return volume; }
-    public void setVolume(double volume) { this.volume = volume; }
     public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
     public String getOrderId() { return orderId; }
-    public void setOrderId(String orderId) { this.orderId = orderId; }
+    @JsonIgnore public Trade getTrade() { return trade; }
+
+    public TradeLeg setTrade(Trade trade)         { this.trade = trade;         return this; }
+    public TradeLeg setLegIndex(int legIndex)      { this.legIndex = legIndex;   return this; }
+    public TradeLeg setPair(String pair)           { this.pair = pair;           return this; }
+    public TradeLeg setDirection(String direction) { this.direction = direction; return this; }
+    public TradeLeg setPrice(double price)         { this.price = price;         return this; }
+    public TradeLeg setVolume(double volume)       { this.volume = volume;       return this; }
+    public TradeLeg setStatus(String status)       { this.status = status;       return this; }
+    public TradeLeg setOrderId(String orderId)     { this.orderId = orderId;     return this; }
 }

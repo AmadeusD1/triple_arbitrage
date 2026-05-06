@@ -1,0 +1,21 @@
+# Application
+app_user: arb
+app_dir: /opt/arb
+app_port: 8080
+
+# Database
+db_name: trades
+db_user: arb
+db_password: "change_me"       # use ansible-vault for production
+
+# Web app admin user (created by DataInitializer on first boot — not by init.sql)
+admin_username: admin
+admin_password: "change_me"    # use ansible-vault for production
+
+# Kraken API — leave blank to run in simulation mode
+kraken_api_key: ""
+kraken_api_secret: ""
+
+# Nginx
+http_port: 80
+server_name: "_"               # replace with your domain name if available

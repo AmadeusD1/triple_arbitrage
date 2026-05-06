@@ -1,0 +1,201 @@
+---
+# ── Play 1: Build artifacts locally ──────────────────────────────────────────
+- name: Build locally
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Build backend JAR
+      command: ./gradlew bootJar
+      args:
+        chdir: "{{ playbook_dir }}/../backend"
+      changed_when: true
+
+    - name: Build frontend
+      command: npm run build
+      args:
+        chdir: "{{ playbook_dir }}/../frontend"
+      changed_when: true
+
+# ── Play 2: Deploy to server ──────────────────────────────────────────────────
+- name: Deploy ARB application
+  hosts: appservers
+  become: true
+
+  handlers:
+    - name: restart arb
+      systemd:
+        name: arb
+        state: restarted
+        daemon_reload: true
+
+    - name: reload nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+  tasks:
+
+    # ── System packages ────────────────────────────────────────────────────────
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - openjdk-21-jdk-headless
+          - nginx
+          - postgresql
+          - postgresql-client
+          - python3-psycopg2
+          - rsync
+          - acl
+        state: present
+
+    # ── App user + directory ───────────────────────────────────────────────────
+    - name: Create app system user
+      user:
+        name: "{{ app_user }}"
+        system: true
+        shell: /usr/sbin/nologin
+        home: "{{ app_dir }}"
+        create_home: false
+
+    - name: Create app directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0750"
+
+    # ── PostgreSQL ─────────────────────────────────────────────────────────────
+    - name: Ensure PostgreSQL is started
+      systemd:
+        name: postgresql
+        state: started
+        enabled: true
+
+    - name: Create database user
+      become_user: postgres
+      community.postgresql.postgresql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+
+    - name: Create database
+      become_user: postgres
+      community.postgresql.postgresql_db:
+        name: "{{ db_name }}"
+        owner: "{{ db_user }}"
+
+    - name: Copy schema migration
+      copy:
+        src: "{{ playbook_dir }}/../db/migrations/init.sql"
+        dest: /tmp/arb-init.sql
+        mode: "0644"
+
+    - name: Run schema migration
+      become_user: postgres
+      shell: psql -d {{ db_name }} -f /tmp/arb-init.sql
+      changed_when: false   # init.sql uses IF NOT EXISTS / ON CONFLICT — idempotent
+
+    # ── Backend ────────────────────────────────────────────────────────────────
+    - name: Upload JAR
+      copy:
+        src: "{{ playbook_dir }}/../backend/build/libs/arb.jar"
+        dest: "{{ app_dir }}/arb.jar"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0640"
+      notify: restart arb
+
+    - name: Create env config directory
+      file:
+        path: /etc/arb
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0750"
+
+    - name: Write environment file
+      template:
+        src: templates/arb.env.j2
+        dest: /etc/arb/arb.env
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0640"
+      notify: restart arb
+
+    - name: Install systemd service
+      template:
+        src: templates/arb.service.j2
+        dest: /etc/systemd/system/arb.service
+        mode: "0644"
+      notify: restart arb
+
+    - name: Enable and start arb service
+      systemd:
+        name: arb
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # ── Server convenience scripts ─────────────────────────────────────────────
+    - name: Deploy service management scripts
+      template:
+        src: "templates/{{ item }}.j2"
+        dest: "{{ app_dir }}/{{ item }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+      loop:
+        - start.sh
+        - stop.sh
+        - restart.sh
+        - status.sh
+
+    # ── Frontend ───────────────────────────────────────────────────────────────
+    - name: Create web root
+      file:
+        path: /var/www/arb
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: "0755"
+
+    - name: Upload frontend dist
+      synchronize:
+        src: "{{ playbook_dir }}/../frontend/dist/"
+        dest: /var/www/arb/
+        delete: true
+        rsync_opts:
+          - "--chown=www-data:www-data"
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: reload nginx
+
+    - name: Install nginx site config
+      template:
+        src: templates/nginx-arb.conf.j2
+        dest: /etc/nginx/sites-available/arb
+        mode: "0644"
+      notify: reload nginx
+
+    - name: Enable nginx site
+      file:
+        src: /etc/nginx/sites-available/arb
+        dest: /etc/nginx/sites-enabled/arb
+        state: link
+      notify: reload nginx
+
+    - name: Ensure nginx is started
+      systemd:
+        name: nginx
+        state: started
+        enabled: true

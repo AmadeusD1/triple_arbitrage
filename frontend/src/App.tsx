@@ -15,10 +15,20 @@ const theme = createTheme({ palette: { mode: 'dark' } });
 
 const PAGES = ['/', '/trades', '/positions', '/open-orders', '/prices', '/settings', '/triangles', '/users'] as const;
 
+// USER  → dashboard, trades, feeds only
+// QUANT → everything except /users
+// ADMIN → everything
+function canAccess(role: string, path: string): boolean {
+  if (role === 'ADMIN') return true;
+  if (role === 'QUANT') return path !== '/users';
+  return ['/', '/trades', '/prices'].includes(path);
+}
+
 function NavBar() {
   const path = window.location.pathname;
   const active = PAGES.includes(path as typeof PAGES[number]) ? path : '/';
   const { logout, user } = useAuth();
+
   const nav = (href: string, label: string) => (
     <Button
       size="small"
@@ -28,6 +38,9 @@ function NavBar() {
       {label}
     </Button>
   );
+
+  const role = user?.role ?? '';
+
   return (
     <Box
       component="nav"
@@ -44,16 +57,16 @@ function NavBar() {
         {/* Left: primary navigation */}
         {nav('/', 'Dashboard')}
         {nav('/trades', 'Trades')}
-        {nav('/positions', 'Positions')}
-        {nav('/open-orders', 'Open Orders')}
+        {canAccess(role, '/positions')   && nav('/positions',   'Positions')}
+        {canAccess(role, '/open-orders') && nav('/open-orders', 'Open Orders')}
 
         <Box sx={{ flex: 1 }} />
 
         {/* Right: config / data views */}
         {nav('/prices', 'Feeds')}
-        {nav('/triangles', 'Exchange Settings')}
-        {nav('/settings', 'Settings')}
-        {user?.role === 'ADMIN' && nav('/users', 'Users')}
+        {canAccess(role, '/triangles') && nav('/triangles', 'Exchange Settings')}
+        {canAccess(role, '/settings')  && nav('/settings',  'Settings')}
+        {canAccess(role, '/users')     && nav('/users',     'Users')}
 
         <Box sx={{ color: 'text.secondary', fontSize: '0.8rem', mr: 1, ml: 1 }}>{user?.username}</Box>
         <Button size="small" color="inherit" onClick={() => void logout()}>Logout</Button>
@@ -77,17 +90,19 @@ function AppRoutes() {
   if (!user) return <Login />;
 
   const path = window.location.pathname;
+  const role = user.role;
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <NavBar />
       <Box component="main" sx={{ flex: 1 }}>
         {path === '/trades'       && <Trades      trades={live?.recentTrades ?? []} />}
-        {path === '/positions'    && <Positions />}
-        {path === '/open-orders'  && <OpenOrders />}
+        {path === '/positions'    && canAccess(role, path) && <Positions />}
+        {path === '/open-orders'  && canAccess(role, path) && <OpenOrders />}
         {path === '/prices'       && <Prices      prices={live?.prices ?? []} />}
-        {path === '/settings'     && <Settings />}
-        {path === '/triangles'    && <Triangles   prices={live?.prices ?? []} />}
-        {path === '/users'        && user.role === 'ADMIN' && <Users />}
+        {path === '/settings'     && canAccess(role, path) && <Settings />}
+        {path === '/triangles'    && canAccess(role, path) && <Triangles prices={live?.prices ?? []} />}
+        {path === '/users'        && canAccess(role, path) && <Users />}
         {path !== '/trades' && path !== '/positions' && path !== '/open-orders' &&
          path !== '/prices' && path !== '/settings'  && path !== '/triangles' &&
          path !== '/users'  && <Dashboard />}

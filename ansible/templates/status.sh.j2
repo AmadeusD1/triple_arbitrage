@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+systemctl status arb --no-pager
+echo "────────────────────────────── recent logs ──────────────────────────────"
+journalctl -u arb -n 30 --no-pager

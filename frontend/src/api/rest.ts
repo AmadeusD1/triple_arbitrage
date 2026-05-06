@@ -58,5 +58,6 @@ export const updateTriangle  = (id: number, data: TrianglePayload): Promise<Axio
 export const deleteTriangle  = (id: number): Promise<AxiosResponse<void>>            => client.delete(`/triangles/${id}`);
 
 export const getUsers   = ():                                            Promise<AxiosResponse<AppUser[]>> => client.get('/users');
-export const createUser = (username: string, password: string):         Promise<AxiosResponse<AppUser>>   => client.post('/users', { username, password });
-export const deleteUser = (id: number):                                  Promise<AxiosResponse<void>>      => client.delete(`/users/${id}`);
+export const createUser = (username: string, password: string, role: string): Promise<AxiosResponse<AppUser>> => client.post('/users', { username, password, role });
+export const updateUserRole = (id: number, role: string):               Promise<AxiosResponse<AppUser>>   => client.patch(`/users/${id}/role`, { role });
+export const deleteUser     = (id: number):                              Promise<AxiosResponse<void>>      => client.delete(`/users/${id}`);

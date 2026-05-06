@@ -1,0 +1,16 @@
+[Unit]
+Description=ARB Triangular Arbitrage
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User={{ app_user }}
+EnvironmentFile=/etc/arb/arb.env
+ExecStart=/usr/bin/java -jar {{ app_dir }}/arb.jar
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

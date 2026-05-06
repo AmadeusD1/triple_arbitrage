@@ -290,25 +290,22 @@ public class AutoTrader {
 
     private Trade buildTrade(Signal signal, List<LegResult> legResults,
                              long latencyMs, double estimatedPnl, boolean filled) {
-        var trade = new Trade();
-        trade.setTime(LocalDateTime.now());
-        trade.setDirection(signal.cycle());
-        trade.setSpread(signal.profit());
-        trade.setPnl(estimatedPnl);
-        trade.setStatus(broker.isSimulation() ? "SIMULATION" : filled ? "FILLED" : "CANCELLED");
-        trade.setLatencyMs(latencyMs);
+        var trade = new Trade()
+            .setTime(LocalDateTime.now())
+            .setDirection(signal.cycle())
+            .setSpread(signal.profit())
+            .setPnl(estimatedPnl)
+            .setStatus(broker.isSimulation() ? "SIMULATION" : filled ? "FILLED" : "CANCELLED")
+            .setLatencyMs(latencyMs);
 
-        for (var lr : legResults) {
-            var leg = new TradeLeg();
-            leg.setLegIndex(lr.legIndex());
-            leg.setPair(lr.pair());
-            leg.setDirection(lr.direction());
-            leg.setPrice(lr.price());
-            leg.setVolume(lr.volume());
-            leg.setStatus(broker.isSimulation() ? "SIMULATED" : lr.filled() ? "FILLED" : "FAILED");
-            leg.setOrderId(lr.orderId());
-            trade.addLeg(leg);
-        }
+        legResults.forEach(lr -> trade.addLeg(new TradeLeg()
+            .setLegIndex(lr.legIndex())
+            .setPair(lr.pair())
+            .setDirection(lr.direction())
+            .setPrice(lr.price())
+            .setVolume(lr.volume())
+            .setStatus(broker.isSimulation() ? "SIMULATED" : lr.filled() ? "FILLED" : "FAILED")
+            .setOrderId(lr.orderId())));
         return trade;
     }
 

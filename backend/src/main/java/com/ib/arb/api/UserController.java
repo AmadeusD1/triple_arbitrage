@@ -22,8 +22,10 @@ public class UserController {
         this.passwordEncoder = passwordEncoder;
     }
 
+    private static final java.util.Set<String> VALID_ROLES = java.util.Set.of("ADMIN", "USER", "QUANT");
+
     public record UserResponse(Long id, String username, String role) {}
-    public record CreateUserRequest(String username, String password) {}
+    public record CreateUserRequest(String username, String password, String role) {}
 
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
@@ -39,12 +41,29 @@ public class UserController {
         if (userRepo.findByUsername(req.username()).isPresent())
             return ResponseEntity.badRequest().build();
 
+        var role = (req.role() != null && VALID_ROLES.contains(req.role())) ? req.role() : "USER";
+
         var user = new User();
         user.setUsername(req.username());
         user.setPassword(passwordEncoder.encode(req.password()));
-        user.setRole("USER");
+        user.setRole(role);
         var saved = userRepo.save(user);
         return ResponseEntity.ok(new UserResponse(saved.getId(), saved.getUsername(), saved.getRole()));
+    }
+
+    public record UpdateRoleRequest(String role) {}
+
+    @PatchMapping("/{id}/role")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<UserResponse> updateRole(@PathVariable("id") Long id,
+                                                   @RequestBody UpdateRoleRequest req) {
+        if (req.role() == null || !VALID_ROLES.contains(req.role()))
+            return ResponseEntity.badRequest().build();
+        return userRepo.findById(id).map(user -> {
+            user.setRole(req.role());
+            var saved = userRepo.save(user);
+            return ResponseEntity.ok(new UserResponse(saved.getId(), saved.getUsername(), saved.getRole()));
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/{id}")
