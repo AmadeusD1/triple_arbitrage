@@ -90,6 +90,12 @@ cd frontend && npm run lint         # ESLint + TypeScript check
 npx tsc --project tsconfig.app.json --noEmit  # type-check only
 ```
 
+**Environment variables** (`frontend/.env`, copy from `frontend/.env.example`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `BACKEND_PORT` | `8080` | Spring Boot backend port for the Vite dev-server proxy |
+
 ## Database Migrations
 
 Single combined migration — apply on a fresh database:
