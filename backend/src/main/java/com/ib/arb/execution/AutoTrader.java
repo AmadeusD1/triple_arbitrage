@@ -25,18 +25,15 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * Orchestrates a single arbitrage cycle: scan → validate → execute → record → broadcast.
+ * Orchestrates arbitrage cycles (automated and manual): scan → validate → execute → record → broadcast.
  *
- * <p>Called by {@code ArbitrageScheduler} on a fixed delay. The full cycle is:
- * <ol>
- *   <li>Skip if within the post-trade cooldown window or open-order limit is reached.</li>
- *   <li>Ask {@link ArbitrageEngine} for the best current signal.</li>
- *   <li>Confirm sufficient exchange balance via {@link PositionService}.</li>
- *   <li>Run pre-trade risk checks via {@link RiskService}.</li>
- *   <li>Place orders — either simulated (log only) or live via {@link KrakenOrderClient}.</li>
- *   <li>Persist the {@link Trade} and its {@link TradeLeg}s.</li>
- *   <li>Broadcast a {@link DashboardSnapshot} to all connected WebSocket clients.</li>
- * </ol>
+ * <p>Automated path (called by {@code ArbitrageScheduler}):
+ * {@code attemptArbitrage()} guards + scans, then delegates to {@code executeArbitrage(Signal)}.
+ *
+ * <p>Manual path (called by {@code ArbitrageController}):
+ * {@code executeTrade()} accepts caller-provided legs and bypasses the cooldown.
+ *
+ * <p>Both paths share {@code validatePreExecution()} and {@code finalizeExecution()} helpers.
  */
 @Service
 public class AutoTrader {
@@ -104,21 +101,24 @@ public class AutoTrader {
         boolean tradeInProgress
     ) {}
 
+    // -------------------------------------------------------------------------
+    // Automated path
+    // -------------------------------------------------------------------------
+
     /**
-     * Attempts one arbitrage cycle. Returns immediately if within the cooldown window,
-     * the open-order limit is reached, or no profitable signal exists.
-     *
-     * <p>In simulation mode the broker is not called; orders are logged at INFO level
-     * and the trade is recorded as {@code SIMULATION}. In live mode, a partial fill
-     * results in a {@code CANCELLED} trade with individual leg statuses recorded for audit.
+     * Guards (cooldown + open-order limit) → scans for a signal → delegates to
+     * {@link #executeArbitrage(Signal)}. Returns immediately (with a broadcast) on any guard failure
+     * or when no profitable signal is found.
      */
     public void attemptArbitrage() {
         if (broker.openOrderCount() >= maxOpenOrders) {
+            log.debug("[ARB] Skipping — open order limit reached ({})", maxOpenOrders);
             broadcast();
             return;
         }
 
         if (System.currentTimeMillis() - lastTradeCompletedMs < tradeCooldownMs) {
+            log.debug("[ARB] Skipping — within cooldown window");
             broadcast();
             return;
         }
@@ -129,27 +129,27 @@ public class AutoTrader {
             return;
         }
 
+        executeArbitrage(signal.get());
+    }
+
+    /**
+     * Executes the automated arbitrage path for a detected signal:
+     * validate → place combo order → finalize.
+     */
+    private void executeArbitrage(Signal s) {
         detected++;
-        var s = signal.get();
         totalEdge += s.profit();
+        log.info("[ARB] Signal detected — triangle={} exchange={} cycle={} profit={}",
+            s.config().getId(), s.exchange(), s.cycle(), String.format("%.5f", s.profit()));
 
-        if (!hasBalanceForAllLegs(s.exchange(), s.config(), s.cycle(), orderSizeUsd)) {
-            missed++;
-            broadcast();
-            return;
-        }
-
-        var riskResult = risk.check(orderSizeUsd);
-        if (!riskResult.allowed()) {
-            missed++;
-            broadcast();
-            return;
-        }
-
-        var profitResult = risk.checkProfit(
-            s.config().getMinProfitPercent(), s.config().getMinProfitUsd(),
-            s.profit(), s.profit() * orderSizeUsd);
-        if (!profitResult.allowed()) {
+        var v = validatePreExecution(s.exchange(), s.config(), s.cycle(), orderSizeUsd, s.profit());
+        if (!v.allowed()) {
+            switch (v.rejectionStatus()) {
+                case "REJECTED_BALANCE" -> log.warn("[ARB] Missed — insufficient balance for triangle={} cycle={}",
+                    s.config().getId(), s.cycle());
+                case "REJECTED_RISK"    -> log.warn("[ARB] Missed — risk check failed: {}", v.reason());
+                case "REJECTED_PROFIT"  -> log.warn("[ARB] Missed — profit threshold not met: {}", v.reason());
+            }
             missed++;
             broadcast();
             return;
@@ -161,6 +161,8 @@ public class AutoTrader {
             broadcast();
         }
 
+        log.info("[ARB] Placing orders — triangle={} cycle={} orderSize={}",
+            s.config().getId(), s.cycle(), orderSizeUsd);
         var start = System.currentTimeMillis();
         List<LegResult> legResults;
         if (broker.isSimulation()) {
@@ -171,63 +173,56 @@ public class AutoTrader {
                     .reduce((a, b) -> a + ", " + b).orElse(""),
                 String.format("%.5f", s.profit()));
         } else {
-            legResults = broker.placeComboOrder(s, orderSizeUsd);
+            legResults = broker.placeOrder(s, orderSizeUsd);
         }
         var latencyMs = System.currentTimeMillis() - start;
-
-        executing = false;
-        lastTradeCompletedMs = System.currentTimeMillis();
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
         var estimatedPnl = filled ? s.profit() * orderSizeUsd : 0.0;
 
-        var trade = buildTrade(s, legResults, latencyMs, estimatedPnl, filled);
-        tradeRepo.save(trade);
-
-        if (filled) {
-            executed++;
-            triangleConfigRepo.incrementStats(s.config().getId(), estimatedPnl);
-            alerts.tradeFilled(s, estimatedPnl);
-        } else {
-            missed++;
-        }
-
-        broadcast();
+        finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true);
     }
+
+    // -------------------------------------------------------------------------
+    // Manual path
+    // -------------------------------------------------------------------------
 
     /**
      * Executes a trade immediately for the given triangle and cycle, bypassing the
      * cooldown. Open-order limit, balance, and risk checks still apply.
      */
     public ManualTradeResult executeTrade(TriangleConfig config, String cycle,
-                                          List<KrakenOrderClient.ManualLeg> legs) {
-        if (broker.openOrderCount() >= maxOpenOrders)
+                                          List<KrakenOrderClient.OrderLeg> legs) {
+        log.info("[MANUAL] executeTrade triangle={} exchange={} cycle={} legs={}",
+            config.getId(), config.getExchange(), cycle, legs.size());
+
+        if (broker.openOrderCount() >= maxOpenOrders) {
+            log.warn("[MANUAL] Rejected — open order limit reached ({})", maxOpenOrders);
             return new ManualTradeResult(-1, "REJECTED_OPEN_ORDERS", 0.0);
+        }
 
         var exchange = Exchange.valueOf(config.getExchange().toUpperCase());
         // Derive notional size from leg 1 (price × volume) for balance and risk checks
-        var leg1 = legs.get(0);
-        var leg2 = legs.get(1);
-        var leg3 = legs.get(2);
-        var notional = leg1.price() * leg1.volume();
+        var notional = legs.get(0).price() * legs.get(0).volume();
         var edge = "A".equals(cycle)
-            ? leg1.price() * leg2.price() - leg3.price()
-            : leg3.price() - leg1.price() * leg2.price();
-        if (!hasBalanceForAllLegs(exchange, config, cycle, notional))
-            return new ManualTradeResult(-1, "REJECTED_BALANCE", 0.0);
+            ? legs.get(0).price() * legs.get(1).price() - legs.get(2).price()
+            : legs.get(2).price() - legs.get(0).price() * legs.get(1).price();
 
-        var riskResult = risk.check(notional);
-        if (!riskResult.allowed())
-            return new ManualTradeResult(-1, "REJECTED_RISK", 0.0);
-
-        var profitResult = risk.checkProfit(
-            config.getMinProfitPercent(), config.getMinProfitUsd(),
-            edge, edge * notional);
-        if (!profitResult.allowed())
-            return new ManualTradeResult(-1, "REJECTED_PROFIT", 0.0);
+        var v = validatePreExecution(exchange, config, cycle, notional, edge);
+        if (!v.allowed()) {
+            switch (v.rejectionStatus()) {
+                case "REJECTED_BALANCE" -> log.warn("[MANUAL] Rejected — insufficient balance for triangle={} cycle={}",
+                    config.getId(), cycle);
+                case "REJECTED_RISK"    -> log.warn("[MANUAL] Rejected — risk check failed: {}", v.reason());
+                case "REJECTED_PROFIT"  -> log.warn("[MANUAL] Rejected — profit threshold not met: {}", v.reason());
+            }
+            return new ManualTradeResult(-1, v.rejectionStatus(), 0.0);
+        }
 
         if (!broker.isSimulation()) { executing = true; broadcast(); }
 
+        log.info("[MANUAL] Placing orders — triangle={} cycle={} notional={} edge={}",
+            config.getId(), cycle, String.format("%.2f", notional), String.format("%.5f", edge));
         var start = System.currentTimeMillis();
         List<LegResult> legResults;
         if (broker.isSimulation()) {
@@ -236,27 +231,72 @@ public class AutoTrader {
                     l.price(), l.volume(), true, null))
                 .toList();
         } else {
-            legResults = broker.placeSpecificLegs(legs);
+            legResults = broker.placeOrderLegs(legs);
         }
         var latencyMs = System.currentTimeMillis() - start;
-
-        executing = false;
-        lastTradeCompletedMs = System.currentTimeMillis();
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
         var estimatedPnl = filled ? edge * notional : 0.0;
         var signal = new Signal(exchange, config, cycle, edge);
-        var trade = buildTrade(signal, legResults, latencyMs, estimatedPnl, filled);
-        tradeRepo.save(trade);
 
-        if (filled) { executed++; triangleConfigRepo.incrementStats(config.getId(), estimatedPnl); }
-        else missed++;
-
-        broadcast();
+        var trade = finalizeExecution(signal, legResults, latencyMs, estimatedPnl, filled, "MANUAL", false);
         return new ManualTradeResult(trade.getId(), trade.getStatus(), estimatedPnl);
     }
 
     public record ManualTradeResult(long tradeId, String status, double pnl) {}
+
+    // -------------------------------------------------------------------------
+    // Shared helpers
+    // -------------------------------------------------------------------------
+
+    private record ValidationResult(boolean allowed, String rejectionStatus, String reason) {
+        static ValidationResult ok() { return new ValidationResult(true, null, null); }
+        static ValidationResult reject(String status, String reason) { return new ValidationResult(false, status, reason); }
+    }
+
+    /** Validates balance, risk limits, and profit threshold. Does not log — callers log with their own prefix. */
+    private ValidationResult validatePreExecution(Exchange exchange, TriangleConfig config,
+                                                   String cycle, double notional, double edge) {
+        if (!hasBalanceForAllLegs(exchange, config, cycle, notional))
+            return ValidationResult.reject("REJECTED_BALANCE", null);
+
+        var riskResult = risk.check(notional);
+        if (!riskResult.allowed())
+            return ValidationResult.reject("REJECTED_RISK", riskResult.reason());
+
+        var profitResult = risk.checkProfit(
+            config.getMinProfitPercent(), config.getMinProfitUsd(), edge, edge * notional);
+        if (!profitResult.allowed())
+            return ValidationResult.reject("REJECTED_PROFIT", profitResult.reason());
+
+        return ValidationResult.ok();
+    }
+
+    /** Persists the trade, updates stats, optionally sends an alert, and broadcasts. Returns the saved trade. */
+    private Trade finalizeExecution(Signal signal, List<LegResult> legResults,
+                                     long latencyMs, double estimatedPnl, boolean filled,
+                                     String logPrefix, boolean sendAlert) {
+        executing = false;
+        lastTradeCompletedMs = System.currentTimeMillis();
+
+        var trade = buildTrade(signal, legResults, latencyMs, estimatedPnl, filled);
+        tradeRepo.save(trade);
+
+        if (filled) {
+            executed++;
+            triangleConfigRepo.incrementStats(signal.config().getId(), estimatedPnl);
+            if (sendAlert) alerts.tradeFilled(signal, estimatedPnl);
+            log.info("[{}] Trade filled — tradeId={} pnl={} latencyMs={}",
+                logPrefix, trade.getId(), String.format("%.2f", estimatedPnl), latencyMs);
+        } else {
+            missed++;
+            log.warn("[{}] Trade not fully filled — tradeId={} status={}",
+                logPrefix, trade.getId(), trade.getStatus());
+        }
+
+        broadcast();
+        return trade;
+    }
 
     private boolean hasBalanceForAllLegs(Exchange exchange, TriangleConfig config,
                                           String cycle, double orderSize) {
@@ -298,16 +338,30 @@ public class AutoTrader {
             .setStatus(broker.isSimulation() ? "SIMULATION" : filled ? "FILLED" : "CANCELLED")
             .setLatencyMs(latencyMs);
 
-        legResults.forEach(lr -> trade.addLeg(new TradeLeg()
-            .setLegIndex(lr.legIndex())
-            .setPair(lr.pair())
-            .setDirection(lr.direction())
-            .setPrice(lr.price())
-            .setVolume(lr.volume())
-            .setStatus(broker.isSimulation() ? "SIMULATED" : lr.filled() ? "FILLED" : "FAILED")
-            .setOrderId(lr.orderId())));
+        legResults.forEach(lr -> {
+            log.info("[TRADE] Leg {} — {} {} price={} volume={} status={} orderId={}",
+                lr.legIndex(), lr.direction(), lr.pair(),
+                lr.price(), String.format("%.6f", lr.volume()),
+                broker.isSimulation() ? "SIMULATED" : lr.filled() ? "FILLED" : "FAILED",
+                lr.orderId() != null ? lr.orderId() : "-");
+            trade.addLeg(new TradeLeg()
+                .setLegIndex(lr.legIndex())
+                .setPair(lr.pair())
+                .setDirection(lr.direction())
+                .setPrice(lr.price())
+                .setVolume(lr.volume())
+                .setStatus(broker.isSimulation() ? "SIMULATED" : lr.filled() ? "FILLED" : "FAILED")
+                .setOrderId(lr.orderId()));
+        });
+        log.info("[TRADE] Built — cycle={} spread={} pnl={} status={} latencyMs={}",
+            signal.cycle(), String.format("%.5f", signal.profit()),
+            String.format("%.2f", estimatedPnl), trade.getStatus(), latencyMs);
         return trade;
     }
+
+    // -------------------------------------------------------------------------
+    // Stats & broadcast
+    // -------------------------------------------------------------------------
 
     /**
      * Cumulative performance counters since the last application restart.

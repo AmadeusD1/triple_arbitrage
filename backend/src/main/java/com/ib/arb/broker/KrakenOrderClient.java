@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   <li><b>Simulation</b> ({@code simulation_mode = 1}): {@link #computeLegs} returns
  *       the intended order metadata from the live order book without placing any orders.
  *       Used by {@code AutoTrader} for dry-run logging.</li>
- *   <li><b>Live</b> ({@code simulation_mode = 0}): {@link #placeComboOrder} places three
+ *   <li><b>Live</b> ({@code simulation_mode = 0}): {@link #placeOrder} places three
  *       sequential limit orders at the current bid/ask and returns each leg's Kraken txid.</li>
  * </ul>
  *
@@ -69,7 +69,7 @@ public class KrakenOrderClient {
                             double price, double volume, boolean filled, String orderId) {}
 
     /** Caller-supplied leg specification used by manual trade execution. */
-    public record ManualLeg(int legIndex, String pair, String direction, double price, double volume) {}
+    public record OrderLeg(int legIndex, String pair, String direction, double price, double volume) {}
 
     /** Internal metadata computed from the order book before any orders are placed. */
     private record LegMeta(int legIndex, String pair, String direction, double price, double volume) {}
@@ -105,7 +105,7 @@ public class KrakenOrderClient {
     /**
      * Returns the number of orders currently being placed by this client.
      *
-     * <p>Incremented at the start of {@link #placeComboOrder} and decremented when it
+     * <p>Incremented at the start of {@link #placeOrder} and decremented when it
      * returns, so a value of {@code 1} means a combo is in flight. Used by
      * {@code AutoTrader} to enforce the {@code max-open-orders} limit.
      */
@@ -149,37 +149,27 @@ public class KrakenOrderClient {
      * @return list of {@link LegResult}s in leg order (1–3); may be shorter than 3 if a
      *         leg failed or a snapshot was unavailable; empty if no snapshots could be read
      */
-    public List<LegResult> placeComboOrder(Signal signal, double orderSizeUsd) {
+    public List<LegResult> placeOrder(Signal signal, double orderSizeUsd) {
         var meta = buildLegMeta(signal, orderSizeUsd);
         if (meta.isEmpty()) return List.of();
-
-        var results = new ArrayList<LegResult>();
-        openOrders.incrementAndGet();
-        try {
-            for (var l : meta) {
-                var krakenPair = KrakenOrderBookFeed.toKrakenSymbol(l.pair());
-                var txid = addOrder(krakenPair, l.direction().toLowerCase(), l.price(), l.volume());
-                results.add(new LegResult(l.legIndex(), l.pair(), l.direction(),
-                    l.price(), l.volume(), txid.isPresent(), txid.orElse(null)));
-                if (txid.isEmpty()) break;
-            }
-        } finally {
-            openOrders.decrementAndGet();
-        }
-        return results;
+        return placeOrderLegs(
+            meta.stream()
+                .map(l -> new OrderLeg(l.legIndex(), l.pair(), l.direction(), l.price(), l.volume()))
+                .toList()
+        );
     }
 
     /**
      * Places orders using caller-supplied prices and volumes rather than computing
      * them from the live order book. Used for manual trade execution.
      */
-    public List<LegResult> placeSpecificLegs(List<ManualLeg> legs) {
+    public List<LegResult> placeOrderLegs(List<OrderLeg> legs) {
         var results = new ArrayList<LegResult>();
         openOrders.incrementAndGet();
         try {
             for (var l : legs) {
                 var krakenPair = KrakenOrderBookFeed.toKrakenSymbol(l.pair());
-                var txid = addOrder(krakenPair, l.direction().toLowerCase(), l.price(), l.volume());
+                var txid = sendOrder(krakenPair, l.direction().toLowerCase(), l.price(), l.volume());
                 results.add(new LegResult(l.legIndex(), l.pair(), l.direction(),
                     l.price(), l.volume(), txid.isPresent(), txid.orElse(null)));
                 if (txid.isEmpty()) break;
@@ -214,7 +204,7 @@ public class KrakenOrderClient {
     }
 
     /** Submits one limit order to Kraken and returns the txid on success, or empty on any failure. */
-    private Optional<String> addOrder(String pair, String type, double price, double volume) {
+    private Optional<String> sendOrder(String pair, String type, double price, double volume) {
         try {
             var nonce = KrakenAuth.nextNonce();
             var params = new LinkedHashMap<String, String>();

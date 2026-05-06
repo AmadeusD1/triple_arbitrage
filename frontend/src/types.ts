@@ -84,7 +84,7 @@ export interface AppUser {
   role: string;
 }
 
-export interface ManualLeg {
+export interface OrderLeg {
   legIndex: number;
   pair: string;
   direction: string;

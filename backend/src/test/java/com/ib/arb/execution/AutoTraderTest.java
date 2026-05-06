@@ -132,7 +132,7 @@ class AutoTraderTest {
         autoTrader.attemptArbitrage();
 
         assertThat(autoTrader.getStats().missed()).isEqualTo(1);
-        verify(broker, never()).placeComboOrder(any(), anyDouble());
+        verify(broker, never()).placeOrder(any(), anyDouble());
     }
 
     // ── simulation mode ───────────────────────────────────────────────────────
@@ -148,7 +148,7 @@ class AutoTraderTest {
 
         autoTrader.attemptArbitrage();
 
-        verify(broker, never()).placeComboOrder(any(), anyDouble());
+        verify(broker, never()).placeOrder(any(), anyDouble());
         var captor = ArgumentCaptor.forClass(Trade.class);
         verify(tradeRepo).save(captor.capture());
         var saved = captor.getValue();
@@ -165,7 +165,7 @@ class AutoTraderTest {
     void live_recordsFill_with3Legs() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeComboOrder(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
+        when(broker.placeOrder(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
         when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
@@ -190,7 +190,7 @@ class AutoTraderTest {
     void live_recordsCancelled_withPartialLegs_andIncrementsMissed() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeComboOrder(any(), anyDouble())).thenReturn(ONE_FAILED_LEG);
+        when(broker.placeOrder(any(), anyDouble())).thenReturn(ONE_FAILED_LEG);
         when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
@@ -212,7 +212,7 @@ class AutoTraderTest {
     void live_recordsCancelled_whenBrokerReturnsEmpty() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeComboOrder(any(), anyDouble())).thenReturn(List.of());
+        when(broker.placeOrder(any(), anyDouble())).thenReturn(List.of());
         when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
@@ -229,7 +229,7 @@ class AutoTraderTest {
     void incrementStats_notCalled_whenCancelled() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeComboOrder(any(), anyDouble())).thenReturn(ONE_FAILED_LEG);
+        when(broker.placeOrder(any(), anyDouble())).thenReturn(ONE_FAILED_LEG);
         when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
@@ -300,10 +300,10 @@ class AutoTraderTest {
 
     // ── executeTrade (manual) — early rejections ──────────────────────────────
 
-    static final List<KrakenOrderClient.ManualLeg> MANUAL_LEGS = List.of(
-        new KrakenOrderClient.ManualLeg(1, "EURUSD", "BUY",  1.0801, 10_000.0),
-        new KrakenOrderClient.ManualLeg(2, "USDJPY", "BUY",  150.01,    72.0),
-        new KrakenOrderClient.ManualLeg(3, "EURJPY", "SELL", 162.00,    67.0)
+    static final List<KrakenOrderClient.OrderLeg> MANUAL_LEGS = List.of(
+        new KrakenOrderClient.OrderLeg(1, "EURUSD", "BUY",  1.0801, 10_000.0),
+        new KrakenOrderClient.OrderLeg(2, "USDJPY", "BUY",  150.01,    72.0),
+        new KrakenOrderClient.OrderLeg(3, "EURJPY", "SELL", 162.00,    67.0)
     );
     // notional = leg1.price × leg1.volume = 1.0801 × 10_000 ≈ 10_801 USD
 
@@ -423,7 +423,7 @@ class AutoTraderTest {
     }
 
     @Test
-    void manualTrade_simulation_doesNotCallPlaceSpecificLegs() {
+    void manualTrade_simulation_doesNotCallPlaceOrderLegs() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
@@ -431,7 +431,7 @@ class AutoTraderTest {
 
         autoTrader.executeTrade(TRI, "A", MANUAL_LEGS);
 
-        verify(broker, never()).placeSpecificLegs(any());
+        verify(broker, never()).placeOrderLegs(any());
     }
 
     @Test
@@ -453,7 +453,7 @@ class AutoTraderTest {
     void manualTrade_live_filled_savesTrade_withFilledStatus() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeSpecificLegs(any())).thenReturn(THREE_FILLED_LEGS);
+        when(broker.placeOrderLegs(any())).thenReturn(THREE_FILLED_LEGS);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
@@ -471,7 +471,7 @@ class AutoTraderTest {
     void manualTrade_live_cancelled_whenLegFails() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeSpecificLegs(any())).thenReturn(ONE_FAILED_LEG);
+        when(broker.placeOrderLegs(any())).thenReturn(ONE_FAILED_LEG);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
@@ -519,7 +519,7 @@ class AutoTraderTest {
         autoTrader.attemptArbitrage();
 
         assertThat(autoTrader.getStats().missed()).isEqualTo(1);
-        verify(broker, never()).placeComboOrder(any(), anyDouble());
+        verify(broker, never()).placeOrder(any(), anyDouble());
         verify(broker, never()).computeLegs(any(), anyDouble());
     }
 

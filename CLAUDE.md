@@ -320,7 +320,7 @@ Single-page dashboard. Auth state managed by `AuthProvider` — on load, calls `
 | `QUANT` | Everything except Users |
 | `ADMIN` | Everything |
 
-**Shared types** (`src/types.ts`): `CycleDirection`, `LegDirection`, `TradeStatus`, `LegStatus`, `Trade`, `TradeLeg`, `TradeDetail`, `ArbitrageStats`, `DashboardSnapshot`, `EquityPoint`, `Setting`, `ExecutionStats`, `AnalyticsData`, `AuthUser` (`{username, role}`), `AppUser` (`{id, username, role}`), `PriceSnapshot`, `ManualLeg`, `TriangleStatus`, `TriangleConfig`, `BalanceEntry`, `OpenOrder`.
+**Shared types** (`src/types.ts`): `CycleDirection`, `LegDirection`, `TradeStatus`, `LegStatus`, `Trade`, `TradeLeg`, `TradeDetail`, `ArbitrageStats`, `DashboardSnapshot`, `EquityPoint`, `Setting`, `ExecutionStats`, `AnalyticsData`, `AuthUser` (`{username, role}`), `AppUser` (`{id, username, role}`), `PriceSnapshot`, `OrderLeg`, `TriangleStatus`, `TriangleConfig`, `BalanceEntry`, `OpenOrder`.
 
 **WebSocket** (`useDashboardSocket`): connects to `/ws/dashboard`, returns `DashboardSnapshot | null`.
 

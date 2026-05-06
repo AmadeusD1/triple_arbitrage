@@ -9,7 +9,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { getTriangles, createTriangle, updateTriangle, deleteTriangle, manualTrade } from '../api/rest';
-import type { ManualLeg, PriceSnapshot, TriangleConfig, TriangleStatus } from '../types';
+import type { OrderLeg, PriceSnapshot, TriangleConfig, TriangleStatus } from '../types';
 
 interface Props { prices: PriceSnapshot[] }
 
@@ -22,7 +22,7 @@ const EMPTY_FORM: TrianglePayload = {
 
 interface SnackState { open: boolean; message: string; severity: 'success' | 'info' | 'error' }
 
-function computeLegs(t: TriangleConfig, cycle: 'A' | 'B', size: number, prices: PriceSnapshot[]): ManualLeg[] {
+function computeLegs(t: TriangleConfig, cycle: 'A' | 'B', size: number, prices: PriceSnapshot[]): OrderLeg[] {
   const dirs = cycle === 'A' ? ['BUY', 'BUY', 'SELL'] : ['SELL', 'SELL', 'BUY'];
   return [t.pair1, t.pair2, t.pair3].map((pair, i) => {
     const snap = prices.find(p => p.pair === pair);
@@ -39,7 +39,7 @@ export default function Triangles({ prices }: Props) {
 
   const [tradeTarget, setTradeTarget] = useState<TriangleConfig | null>(null);
   const [tradeCycle, setTradeCycle] = useState<'A' | 'B'>('A');
-  const [legs, setLegs] = useState<ManualLeg[]>([]);
+  const [legs, setLegs] = useState<OrderLeg[]>([]);
   const [snack, setSnack] = useState<SnackState>({ open: false, message: '', severity: 'success' });
 
   const load = () => getTriangles().then((res) => setTriangles(res.data.slice().sort((a, b) => a.id - b.id)));

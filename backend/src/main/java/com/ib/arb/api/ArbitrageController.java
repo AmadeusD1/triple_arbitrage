@@ -4,6 +4,8 @@ import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.execution.AutoTrader;
 import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.scheduler.ArbitrageScheduler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +14,8 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/arbitrage")
 public class ArbitrageController {
+
+    private static final Logger log = LoggerFactory.getLogger(ArbitrageController.class);
 
     private final ArbitrageScheduler scheduler;
     private final AutoTrader autoTrader;
@@ -43,16 +47,19 @@ public class ArbitrageController {
 
     @PostMapping("/manual-trade")
     public ResponseEntity<AutoTrader.ManualTradeResult> manualTrade(@RequestBody ManualTradeRequest req) {
+        log.info("[MANUAL] triangleId={} pairs={} cycle={} legs={}",
+            req.triangleId(),
+            req.legs() == null ? "-" : req.legs().stream().map(l -> l.pair()).reduce((a, b) -> a + "/" + b).orElse("-"),
+            req.cycle(), req.legs() == null ? 0 : req.legs().size());
         if (!"A".equals(req.cycle()) && !"B".equals(req.cycle()))
             return ResponseEntity.badRequest().build();
         if (req.legs() == null || req.legs().isEmpty())
             return ResponseEntity.badRequest().build();
         return triangleConfigRepo.findById(req.triangleId())
-            .map(config -> ResponseEntity.ok(
-                autoTrader.executeTrade(config, req.cycle(), req.legs())))
+            .map(config -> ResponseEntity.ok(autoTrader.executeTrade(config, req.cycle(), req.legs())))
             .orElse(ResponseEntity.notFound().build());
     }
 
     public record StatusResponse(boolean running, AutoTrader.ArbitrageStats stats) {}
-    public record ManualTradeRequest(Long triangleId, String cycle, List<KrakenOrderClient.ManualLeg> legs) {}
+    public record ManualTradeRequest(Long triangleId, String cycle, List<KrakenOrderClient.OrderLeg> legs) {}
 }
