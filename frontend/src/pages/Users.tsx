@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  Alert, Box, Button, FormControl, IconButton, InputLabel, MenuItem,
+  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
+  FormControl, IconButton, InputLabel, MenuItem,
   Paper, Select, Snackbar, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, TextField, Typography,
 } from '@mui/material';
@@ -21,6 +22,7 @@ const ROLE_DESCRIPTIONS: Record<Role, string> = {
 export default function Users() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -30,7 +32,7 @@ export default function Users() {
   const [loading, setLoading] = useState(false);
 
   const load = () => {
-    getUsers().then((r) => setUsers(r.data)).catch(() => {});
+    getUsers().then((r) => setUsers(r.data.slice().sort((a, b) => a.id - b.id))).catch(() => {});
   };
 
   useEffect(load, []);
@@ -49,6 +51,7 @@ export default function Users() {
       setPassword('');
       setConfirm('');
       setRole('USER');
+      setCreateOpen(false);
       load();
     } catch {
       setError('Username already exists or request failed.');
@@ -59,7 +62,12 @@ export default function Users() {
 
   return (
     <Box sx={{ p: 3, maxWidth: 600 }}>
-      <Typography variant="h5" gutterBottom>Users</Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5">Users</Typography>
+        <Button variant="contained" size="small" onClick={() => setCreateOpen((v) => !v)}>
+          {createOpen ? 'Cancel' : 'Create User'}
+        </Button>
+      </Box>
 
       <TableContainer component={Paper} sx={{ mb: 4 }}>
         <Table size="small">
@@ -112,57 +120,59 @@ export default function Users() {
         </Table>
       </TableContainer>
 
-      <Typography variant="h6" gutterBottom>Create User</Typography>
-      <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <TextField
-          label="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-          autoComplete="off"
-        />
-        <TextField
-          label="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          autoComplete="new-password"
-        />
-        <TextField
-          label="Confirm Password"
-          type="password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          required
-          error={!!confirmError}
-          helperText={confirmError}
-          autoComplete="new-password"
-        />
-        <FormControl required>
-          <InputLabel>Role</InputLabel>
-          <Select
-            label="Role"
-            value={role}
-            onChange={(e) => setRole(e.target.value as Role)}
-          >
-            {ROLES.map((r) => (
-              <MenuItem key={r} value={r}>
-                {r} — {ROLE_DESCRIPTIONS[r]}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        {error && <Typography color="error" variant="body2">{error}</Typography>}
-        <Button
-          type="submit"
-          variant="contained"
-          disabled={loading || !!confirmError}
-          sx={{ alignSelf: 'flex-start' }}
-        >
-          {loading ? 'Creating…' : 'Create User'}
-        </Button>
-      </Box>
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Create User</DialogTitle>
+        <Box component="form" onSubmit={handleSubmit}>
+          <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            <TextField
+              label="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              autoComplete="off"
+            />
+            <TextField
+              label="Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoComplete="new-password"
+            />
+            <TextField
+              label="Confirm Password"
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+              error={!!confirmError}
+              helperText={confirmError}
+              autoComplete="new-password"
+            />
+            <FormControl required>
+              <InputLabel>Role</InputLabel>
+              <Select
+                label="Role"
+                value={role}
+                onChange={(e) => setRole(e.target.value as Role)}
+              >
+                {ROLES.map((r) => (
+                  <MenuItem key={r} value={r}>
+                    {r} — {ROLE_DESCRIPTIONS[r]}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {error && <Typography color="error" variant="body2">{error}</Typography>}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={loading || !!confirmError}>
+              {loading ? 'Creating…' : 'Create'}
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
 
       <Snackbar
         open={!!success}

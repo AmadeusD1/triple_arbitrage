@@ -42,7 +42,7 @@ export default function Triangles({ prices }: Props) {
   const [legs, setLegs] = useState<ManualLeg[]>([]);
   const [snack, setSnack] = useState<SnackState>({ open: false, message: '', severity: 'success' });
 
-  const load = () => getTriangles().then((res) => setTriangles(res.data));
+  const load = () => getTriangles().then((res) => setTriangles(res.data.slice().sort((a, b) => a.id - b.id)));
   useEffect(() => { void load(); }, []);
 
   const DEFAULT_SIZE = 10_000;
