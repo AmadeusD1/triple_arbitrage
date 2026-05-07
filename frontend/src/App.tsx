@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import OpenOrders from './pages/OpenOrders';
 import Positions from './pages/Positions';
+import CurrencyRates from './pages/CurrencyRates';
 import Prices from './pages/Prices';
 import Settings from './pages/Settings';
 import Trades from './pages/Trades';
@@ -13,7 +14,7 @@ import Users from './pages/Users';
 
 const theme = createTheme({ palette: { mode: 'dark' } });
 
-const PAGES = ['/', '/trades', '/positions', '/open-orders', '/prices', '/settings', '/triangles', '/users'] as const;
+const PAGES = ['/', '/trades', '/positions', '/open-orders', '/prices', '/currency-rates', '/settings', '/triangles', '/users'] as const;
 
 // USER  → dashboard, trades, feeds only
 // QUANT → everything except /users
@@ -21,7 +22,7 @@ const PAGES = ['/', '/trades', '/positions', '/open-orders', '/prices', '/settin
 function canAccess(role: string, path: string): boolean {
   if (role === 'ADMIN') return true;
   if (role === 'QUANT') return path !== '/users';
-  return ['/', '/trades', '/prices'].includes(path);
+  return ['/', '/trades', '/prices', '/currency-rates'].includes(path);
 }
 
 function NavBar() {
@@ -64,6 +65,7 @@ function NavBar() {
 
         {/* Right: config / data views */}
         {nav('/prices', 'Feeds')}
+        {nav('/currency-rates', 'Currency Rates')}
         {canAccess(role, '/triangles') && nav('/triangles', 'Exchange Settings')}
         {canAccess(role, '/settings')  && nav('/settings',  'Settings')}
         {canAccess(role, '/users')     && nav('/users',     'Users')}
@@ -100,12 +102,13 @@ function AppRoutes() {
         {path === '/positions'    && canAccess(role, path) && <Positions />}
         {path === '/open-orders'  && canAccess(role, path) && <OpenOrders />}
         {path === '/prices'       && <Prices      prices={live?.prices ?? []} />}
+        {path === '/currency-rates'     && <CurrencyRates     rates={live?.fxRates ?? {}} />}
         {path === '/settings'     && canAccess(role, path) && <Settings />}
         {path === '/triangles'    && canAccess(role, path) && <Triangles prices={live?.prices ?? []} />}
         {path === '/users'        && canAccess(role, path) && <Users />}
         {path !== '/trades' && path !== '/positions' && path !== '/open-orders' &&
-         path !== '/prices' && path !== '/settings'  && path !== '/triangles' &&
-         path !== '/users'  && <Dashboard />}
+         path !== '/prices' && path !== '/currency-rates'  && path !== '/settings'  &&
+         path !== '/triangles' && path !== '/users'  && <Dashboard />}
       </Box>
     </Box>
   );

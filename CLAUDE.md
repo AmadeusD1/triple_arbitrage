@@ -155,6 +155,10 @@ Shared utility for HMAC-SHA512 signing used by both `KrakenOrderClient` and `Kra
 
 Strategy pattern: `PositionClient` interface per exchange, `KrakenPositionClient` implements it. `PositionService` orchestrates caching (TTL: `kraken.position-cache-ttl-ms`) across all registered clients. Asset key translation for Kraken: ISO currency → `"Z" + iso` (e.g., `USD` → `ZUSD`).
 
+Key methods:
+- `hasAvailableBalance(exchange, isoCurrency, requiredAmount)` — boolean check used by `hasBalanceForAllLegs()`
+- `getAvailableAmount(exchange, isoCurrency)` — returns raw balance amount; used by `computeEffectiveOrderSize()` in `AutoTrader`
+
 ### Edge Detection (ArbitrageEngine)
 
 For each triangle `(pair1, pair2, pair3)`:
@@ -167,12 +171,16 @@ Valid when `edge > arb.edge-threshold` (default `0.00025`). `scanForOpportunitie
 
 1. Skip if within cooldown or open-order limit reached
 2. `ArbitrageEngine.scanForOpportunities()` → best `Signal` or empty
-3. `hasBalanceForAllLegs()` — checks all 3 legs' spent currencies against live order book prices; BUY legs check quote currency (`orderSize`), SELL legs check base currency (`orderSize / bid`)
-4. `RiskService.check(orderSize)` → position limit + daily loss hard-stop
-5. `RiskService.checkProfit(minPercent, minUsd, edge, estimatedPnl)` → per-triangle profit threshold
-6. **Simulation** (`simulation_mode = 1`): log orders, record as `SIMULATION` — no Kraken calls
-7. **Live**: `KrakenOrderClient.placeComboOrder(signal, orderSize)` → 3 sequential limit orders
-8. Save `Trade` + `TradeLeg` records (fluent setters); broadcast `DashboardSnapshot` over WebSocket
+3. `computeEffectiveOrderSize(signal)` — dynamically sizes the order in two passes:
+   - **Pass 1 (balance cap):** for each leg, get available balance of the spent currency (quote for BUY, base for SELL) via `PositionService.getAvailableAmount()`, convert to USD via `getUSDValue()`, take minimum × 0.95. Cap at `arb.order-size-usd`.
+   - **Pass 2 (pair normalization):** for each pair, compute `effectiveOrderSize × getUSDValue(quoteCcy)` and take the minimum — ensures the actual USD notional is the same across all three legs.
+   - `getUSDValue(currency)` is a stub returning `1.0`; **fill in real FX rate lookup before going live.**
+4. `hasBalanceForAllLegs()` — checks all 3 legs' spent currencies against live order book prices using `effectiveOrderSize`; BUY legs check quote currency, SELL legs check base currency (`effectiveOrderSize / bid`)
+5. `RiskService.check(effectiveOrderSize)` → position limit + daily loss hard-stop
+6. `RiskService.checkProfit(minPercent, minUsd, edge, estimatedPnl)` → per-triangle profit threshold
+7. **Simulation** (`simulation_mode = 1`): log orders, record as `SIMULATION` — no Kraken calls
+8. **Live**: `KrakenOrderClient.placeOrder(signal, effectiveOrderSize)` → 3 sequential limit orders
+9. Save `Trade` + `TradeLeg` records (fluent setters); broadcast `DashboardSnapshot` over WebSocket
 
 ### Simulation Mode
 
@@ -309,6 +317,16 @@ alert:
   email-password: ${ALERT_EMAIL_PASS:}
   email-to: ${ALERT_EMAIL_TO:}
 ```
+
+### `arb:` key reference
+
+| Key | Default | Description |
+|---|---|---|
+| `order-size-usd` | `100000` | **Maximum** notional USD trade size per cycle. `AutoTrader` computes a dynamic `effectiveOrderSize` per signal (capped at this value) based on available balances — see `computeEffectiveOrderSize()`. |
+| `edge-threshold` | `0.00025` | Minimum profit edge to consider an opportunity valid |
+| `scan-interval-ms` | `5000` | Milliseconds between scanner cycles |
+| `trade-cooldown-ms` | `10000` | Cooldown after a trade before the next attempt |
+| `max-open-orders` | `1` | Maximum concurrent open orders allowed |
 
 ## Frontend (React + TypeScript + MUI)
 

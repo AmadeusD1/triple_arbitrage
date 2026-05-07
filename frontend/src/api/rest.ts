@@ -48,7 +48,7 @@ export const getBrokerHealth       = (): Promise<AxiosResponse<BrokerHealth>>   
 export const getPositions          = (): Promise<AxiosResponse<BalanceEntry[]>>     => client.get('/positions');
 export const getOpenOrders         = (): Promise<AxiosResponse<OpenOrder[]>>        => client.get('/orders/open');
 
-export const manualTrade = (triangleId: number, cycle: 'A' | 'B', legs: OrderLeg[]) =>
+export const manualTrade = (triangleId: number, cycle: 'A' | 'B' | 'C' | 'D', legs: OrderLeg[]) =>
   client.post<{ tradeId: number; status: string; pnl: number }>('/arbitrage/manual-trade', { triangleId, cycle, legs });
 
 type TrianglePayload = Omit<TriangleConfig, 'id' | 'hits' | 'totalProfitUsd'>;

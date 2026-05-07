@@ -1,12 +1,10 @@
 package com.ib.arb.execution;
 
 import com.ib.arb.alert.AlertService;
-import com.ib.arb.analytics.AnalyticsService;
 import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.broker.KrakenOrderClient.LegResult;
-import com.ib.arb.config.DashboardWebSocketHandler;
 import com.ib.arb.marketdata.Exchange;
-import com.ib.arb.marketdata.PriceSnapshot;
+import com.ib.arb.marketdata.CurrencyRateFeed;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TradeLeg;
 import com.ib.arb.model.TriangleConfig;
@@ -46,9 +44,8 @@ public class AutoTrader {
     private final KrakenOrderClient broker;
     private final TradeRepository tradeRepo;
     private final AlertService alerts;
-    private final AnalyticsService analytics;
-    private final DashboardWebSocketHandler wsHandler;
     private final TriangleConfigRepository triangleConfigRepo;
+    private final CurrencyRateFeed currencyRateFeed;
 
     private volatile long detected = 0;
     private volatile long executed = 0;
@@ -69,37 +66,16 @@ public class AutoTrader {
     public AutoTrader(ArbitrageEngine arbitrageEngine, PositionService positions,
                       RiskService risk, KrakenOrderClient broker,
                       TradeRepository tradeRepo, AlertService alerts,
-                      AnalyticsService analytics, DashboardWebSocketHandler wsHandler,
-                      TriangleConfigRepository triangleConfigRepo) {
+                      TriangleConfigRepository triangleConfigRepo, CurrencyRateFeed currencyRateFeed) {
         this.arbitrageEngine = arbitrageEngine;
         this.positions = positions;
         this.risk = risk;
         this.broker = broker;
         this.tradeRepo = tradeRepo;
         this.alerts = alerts;
-        this.analytics = analytics;
-        this.wsHandler = wsHandler;
         this.triangleConfigRepo = triangleConfigRepo;
+        this.currencyRateFeed = currencyRateFeed;
     }
-
-    /**
-     * Payload broadcast to all WebSocket clients after each arbitrage cycle.
-     *
-     * @param dailyProfitAndLoss cumulative P&amp;L since midnight UTC
-     * @param brokerConnected    {@code true} if API credentials are set (or simulation mode is on)
-     * @param arbStats           in-memory counters since last restart
-     * @param recentTrades       last 20 trades ordered by time descending
-     * @param prices             current bid/ask snapshot for every configured pair
-     * @param tradeInProgress    {@code true} while a live order combo is being placed
-     */
-    public record DashboardSnapshot(
-        double dailyProfitAndLoss,
-        boolean brokerConnected,
-        ArbitrageStats arbStats,
-        List<Trade> recentTrades,
-        List<PriceSnapshot> prices,
-        boolean tradeInProgress
-    ) {}
 
     // -------------------------------------------------------------------------
     // Automated path
@@ -113,19 +89,16 @@ public class AutoTrader {
     public void attemptArbitrage() {
         if (broker.openOrderCount() >= maxOpenOrders) {
             log.debug("[ARB] Skipping — open order limit reached ({})", maxOpenOrders);
-            broadcast();
             return;
         }
 
         if (System.currentTimeMillis() - lastTradeCompletedMs < tradeCooldownMs) {
             log.debug("[ARB] Skipping — within cooldown window");
-            broadcast();
             return;
         }
 
         var signal = arbitrageEngine.scanForOpportunities();
         if (signal.isEmpty()) {
-            broadcast();
             return;
         }
 
@@ -142,7 +115,10 @@ public class AutoTrader {
         log.info("[ARB] Signal detected — triangle={} exchange={} cycle={} profit={}",
             s.config().getId(), s.exchange(), s.cycle(), String.format("%.5f", s.profit()));
 
-        var v = validatePreExecution(s.exchange(), s.config(), s.cycle(), orderSizeUsd, s.profit());
+        var effectiveOrderSize = computeEffectiveOrderSize(s);
+        log.info("[ARB] Effective order size — {}", String.format("%.2f", effectiveOrderSize));
+
+        var v = validatePreExecution(s.exchange(), s.config(), s.cycle(), effectiveOrderSize, s.profit());
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
                 case "REJECTED_BALANCE" -> log.warn("[ARB] Missed — insufficient balance for triangle={} cycle={}",
@@ -151,36 +127,67 @@ public class AutoTrader {
                 case "REJECTED_PROFIT"  -> log.warn("[ARB] Missed — profit threshold not met: {}", v.reason());
             }
             missed++;
-            broadcast();
             return;
         }
 
-        // Signal trade start — broadcast before placing orders so frontend shows the indicator
         if (!broker.isSimulation()) {
             executing = true;
-            broadcast();
         }
 
         log.info("[ARB] Placing orders — triangle={} cycle={} orderSize={}",
-            s.config().getId(), s.cycle(), orderSizeUsd);
+            s.config().getId(), s.cycle(), effectiveOrderSize);
         var start = System.currentTimeMillis();
         List<LegResult> legResults;
         if (broker.isSimulation()) {
-            legResults = broker.computeLegs(s, orderSizeUsd);
+            legResults = broker.computeLegs(s, effectiveOrderSize);
             log.info("[SIM] Cycle {} | {} | profit={}", s.cycle(),
                 legResults.stream()
                     .map(l -> l.direction() + " " + l.pair())
                     .reduce((a, b) -> a + ", " + b).orElse(""),
                 String.format("%.5f", s.profit()));
         } else {
-            legResults = broker.placeOrder(s, orderSizeUsd);
+            legResults = broker.placeOrder(s, effectiveOrderSize);
         }
         var latencyMs = System.currentTimeMillis() - start;
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
-        var estimatedPnl = filled ? s.profit() * orderSizeUsd : 0.0;
+        var estimatedPnl = filled ? s.profit() * effectiveOrderSize : 0.0;
 
         finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true);
+    }
+
+    private double computeEffectiveOrderSize(Signal s) {
+        var pairs = new String[]{ s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
+        var dirs  = switch (s.cycle()) {
+            case "A" -> new String[]{ "BUY", "BUY", "SELL" };
+            case "B" -> new String[]{ "BUY", "SELL", "SELL" };
+            case "C" -> new String[]{ "BUY", "SELL", "BUY" };
+            case "D" -> new String[]{ "SELL", "BUY", "SELL" };
+            default  -> throw new IllegalArgumentException("Unknown cycle: " + s.cycle());
+        };
+
+        // Pass 1: min available balance in USD across all three spent currencies
+        var minBalanceUsd = Double.MAX_VALUE;
+        for (int i = 0; i < 3; i++) {
+            var isBuy    = "BUY".equals(dirs[i]);
+            var spentCcy = isBuy ? pairs[i].substring(3) : pairs[i].substring(0, 3);
+            var avail    = positions.getAvailableAmount(s.exchange(), spentCcy);
+            minBalanceUsd = Math.min(minBalanceUsd, avail * getUSDValue(spentCcy));
+        }
+        var effectiveOrderSize = Math.min(minBalanceUsd * 0.95, orderSizeUsd);
+
+        // Pass 2: normalize to the minimum USD amount across all three pair quote currencies
+        var minLegUsd = effectiveOrderSize;
+        for (var pair : pairs) {
+            var quoteCcy = pair.substring(3);
+            minLegUsd = Math.min(minLegUsd, effectiveOrderSize * getUSDValue(quoteCcy));
+        }
+
+        return minLegUsd;
+    }
+
+    private double getUSDValue(String currency) {
+        return currencyRateFeed.getRate(currency);
     }
 
     // -------------------------------------------------------------------------
@@ -204,9 +211,13 @@ public class AutoTrader {
         var exchange = Exchange.valueOf(config.getExchange().toUpperCase());
         // Derive notional size from leg 1 (price × volume) for balance and risk checks
         var notional = legs.get(0).price() * legs.get(0).volume();
-        var edge = "A".equals(cycle)
-            ? legs.get(0).price() * legs.get(1).price() - legs.get(2).price()
-            : legs.get(2).price() - legs.get(0).price() * legs.get(1).price();
+        var edge = switch (cycle) {
+            case "A" -> legs.get(0).price() * legs.get(1).price() - legs.get(2).price();
+            case "B" -> legs.get(0).price() - legs.get(1).price() * legs.get(2).price();
+            case "C" -> legs.get(0).price() * legs.get(2).price() - legs.get(1).price();
+            case "D" -> legs.get(1).price() - legs.get(0).price() * legs.get(2).price();
+            default  -> 0.0;
+        };
 
         var v = validatePreExecution(exchange, config, cycle, notional, edge);
         if (!v.allowed()) {
@@ -219,7 +230,7 @@ public class AutoTrader {
             return new ManualTradeResult(-1, v.rejectionStatus(), 0.0);
         }
 
-        if (!broker.isSimulation()) { executing = true; broadcast(); }
+        if (!broker.isSimulation()) { executing = true; }
 
         log.info("[MANUAL] Placing orders — triangle={} cycle={} notional={} edge={}",
             config.getId(), cycle, String.format("%.2f", notional), String.format("%.5f", edge));
@@ -294,17 +305,19 @@ public class AutoTrader {
                 logPrefix, trade.getId(), trade.getStatus());
         }
 
-        broadcast();
         return trade;
     }
 
     private boolean hasBalanceForAllLegs(Exchange exchange, TriangleConfig config,
                                           String cycle, double orderSize) {
-        var cycleA = "A".equals(cycle);
         var pairs = new String[]{ config.getPair1(), config.getPair2(), config.getPair3() };
-        var dirs  = cycleA
-            ? new String[]{ "BUY", "BUY", "SELL" }
-            : new String[]{ "SELL", "SELL", "BUY" };
+        var dirs  = switch (cycle) {
+            case "A" -> new String[]{ "BUY", "BUY", "SELL" };
+            case "B" -> new String[]{ "BUY", "SELL", "SELL" };
+            case "C" -> new String[]{ "BUY", "SELL", "BUY" };
+            case "D" -> new String[]{ "SELL", "BUY", "SELL" };
+            default  -> throw new IllegalArgumentException("Unknown cycle: " + cycle);
+        };
 
         var snapshots = arbitrageEngine.currentSnapshots();
 
@@ -377,14 +390,7 @@ public class AutoTrader {
         return new ArbitrageStats(detected, executed, missed, detected > 0 ? totalEdge / detected : 0.0);
     }
 
-    public void broadcast() {
-        wsHandler.broadcast(new DashboardSnapshot(
-            analytics.dailyProfitAndLoss(),
-            broker.isConnected(),
-            getStats(),
-            tradeRepo.findTop20ByOrderByTimeDesc(),
-            arbitrageEngine.currentSnapshots(),
-            executing
-        ));
+    public boolean isExecuting() {
+        return executing;
     }
 }

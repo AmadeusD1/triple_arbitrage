@@ -110,15 +110,18 @@ public class ArbitrageEngine {
         if (!b1.isValid() || !b2.isValid() || !b3.isValid()) return Optional.empty();
 
         var threshold = config.getMinProfitPercent();
+        var cycle = config.getCycle() != null ? config.getCycle() : "A";
 
-        var edgeA = b1.bid() * b2.bid() - b3.ask();
-        if (edgeA > threshold) {
-            return Optional.of(new Signal(feed.getExchange(), config, "A", edgeA));
-        }
+        var edge = switch (cycle) {
+            case "A" -> b1.bid() * b2.bid() - b3.ask();
+            case "B" -> b1.bid() - b2.ask() * b3.ask();
+            case "C" -> b1.bid() * b3.bid() - b2.ask();
+            case "D" -> b2.bid() - b1.ask() * b3.ask();
+            default  -> Double.NEGATIVE_INFINITY;
+        };
 
-        var edgeB = b3.bid() - b1.ask() * b2.ask();
-        if (edgeB > threshold) {
-            return Optional.of(new Signal(feed.getExchange(), config, "B", edgeB));
+        if (edge > threshold) {
+            return Optional.of(new Signal(feed.getExchange(), config, cycle, edge));
         }
 
         return Optional.empty();

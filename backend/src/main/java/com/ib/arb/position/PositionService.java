@@ -41,6 +41,12 @@ public class PositionService {
         return balances.getOrDefault(toAssetKey(exchange, isoCurrency), 0.0) >= requiredAmount;
     }
 
+    public double getAvailableAmount(Exchange exchange, String isoCurrency) {
+        if (isStale(exchange)) refreshBalances(exchange);
+        var balances = balanceCache.getOrDefault(exchange, Map.of());
+        return balances.getOrDefault(toAssetKey(exchange, isoCurrency), 0.0);
+    }
+
     @Scheduled(fixedDelayString = "${kraken.position-cache-ttl-ms:2000}")
     public void scheduledRefresh() {
         clients.forEach(c -> refreshBalances(c.getExchange()));

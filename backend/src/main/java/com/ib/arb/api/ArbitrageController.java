@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/arbitrage")
@@ -51,7 +52,7 @@ public class ArbitrageController {
             req.triangleId(),
             req.legs() == null ? "-" : req.legs().stream().map(l -> l.pair()).reduce((a, b) -> a + "/" + b).orElse("-"),
             req.cycle(), req.legs() == null ? 0 : req.legs().size());
-        if (!"A".equals(req.cycle()) && !"B".equals(req.cycle()))
+        if (!Set.of("A", "B", "C", "D").contains(req.cycle()))
             return ResponseEntity.badRequest().build();
         if (req.legs() == null || req.legs().isEmpty())
             return ResponseEntity.badRequest().build();

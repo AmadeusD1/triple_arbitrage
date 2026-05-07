@@ -58,18 +58,18 @@ CREATE TABLE IF NOT EXISTS "triangles" (
     "status"             TEXT             NOT NULL DEFAULT 'ACTIVE',
     "hits"               BIGINT           NOT NULL DEFAULT 0,
     "total_profit_usd"   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "cycle"              TEXT             NOT NULL DEFAULT 'A',
 
     CONSTRAINT "triangles_pkey" PRIMARY KEY ("id")
 );
 
--- 7 triangles using only Kraken-supported FX spot pairs
--- Supported: AUD/JPY AUD/USD EUR/AUD EUR/CAD EUR/CHF EUR/GBP EUR/JPY EUR/USD GBP/USD USD/CAD USD/CHF USD/JPY
-INSERT INTO "triangles" ("exchange","pair1","pair2","pair3","min_profit_usd","min_profit_percent","status","hits","total_profit_usd") VALUES
-    ('KRAKEN','EURUSD','USDJPY','EURJPY', 10,0.01,'ACTIVE',0,0),
-    ('KRAKEN','EURUSD','USDCHF','EURCHF', 10,0.01,'ACTIVE',0,0),
-    ('KRAKEN','EURGBP','GBPUSD','EURUSD', 10,0.01,'ACTIVE',0,0),
-    ('KRAKEN','AUDUSD','USDJPY','AUDJPY', 10,0.01,'ACTIVE',0,0),
-    ('KRAKEN','EURUSD','USDCAD','EURCAD', 10,0.01,'ACTIVE',0,0),
-    ('KRAKEN','EURAUD','AUDUSD','EURUSD', 10,0.01,'ACTIVE',0,0),
-    ('KRAKEN','EURAUD','AUDJPY','EURJPY', 10,0.01,'ACTIVE',0,0)
+-- cycle A (BUY,BUY,SELL): edge = bid1×bid2 − ask3
+-- cycle B (BUY,SELL,SELL): edge = bid1 − ask2×ask3
+-- cycle C (BUY,SELL,BUY):  edge = bid1×bid3 − ask2
+-- cycle D (SELL,BUY,SELL): edge = bid2 − ask1×ask3
+INSERT INTO "triangles" ("exchange","pair1","pair2","pair3","min_profit_usd","min_profit_percent","status","hits","total_profit_usd","cycle") VALUES
+    ('KRAKEN','GBPUSD','EURGBP','EURUSD', 10,0.01,'ACTIVE',0,0,'A'),
+    ('KRAKEN','EURUSD','EURGBP','GBPUSD', 10,0.01,'ACTIVE',0,0,'B'),
+    ('KRAKEN','EURUSD','EURCHF','USDCHF', 10,0.01,'ACTIVE',0,0,'C'),
+    ('KRAKEN','USDCHF','EURCHF','EURUSD', 10,0.01,'ACTIVE',0,0,'D')
 ON CONFLICT DO NOTHING;

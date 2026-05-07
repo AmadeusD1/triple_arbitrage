@@ -19,6 +19,7 @@ public class TriangleConfig {
     private String status;
     private long hits;
     private double totalProfitUsd;
+    private String cycle;
 
     public Long getId() { return id; }
 
@@ -48,4 +49,7 @@ public class TriangleConfig {
 
     public double getTotalProfitUsd() { return totalProfitUsd; }
     public void setTotalProfitUsd(double totalProfitUsd) { this.totalProfitUsd = totalProfitUsd; }
+
+    public String getCycle() { return cycle; }
+    public void setCycle(String cycle) { this.cycle = cycle; }
 }

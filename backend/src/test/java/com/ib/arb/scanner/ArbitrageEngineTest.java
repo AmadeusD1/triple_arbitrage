@@ -19,6 +19,10 @@ class ArbitrageEngineTest {
     private static final double THRESHOLD = 0.00025;
 
     private static TriangleConfig cfg(String p1, String p2, String p3) {
+        return cfg(p1, p2, p3, "A");
+    }
+
+    private static TriangleConfig cfg(String p1, String p2, String p3, String cycle) {
         var c = new TriangleConfig();
         c.setPair1(p1);
         c.setPair2(p2);
@@ -26,6 +30,7 @@ class ArbitrageEngineTest {
         c.setExchange("KRAKEN");
         c.setMinProfitPercent(THRESHOLD);
         c.setStatus("ACTIVE");
+        c.setCycle(cycle);
         return c;
     }
 
@@ -110,20 +115,70 @@ class ArbitrageEngineTest {
         assertThat(signal.get().exchange()).isEqualTo(Exchange.KRAKEN);
     }
 
-    // ── cycle B ───────────────────────────────────────────────────────────────
+    // ── cycle B (BUY,SELL,SELL): edgeB = bid1 − ask2×ask3 ────────────────────
 
     @Test
-    void scan_detectsCycleB_whenBid3ExceedsAskProduct() {
-        // edgeB = 162.2 - 1.0801 * 150.01 = 162.2 - 162.03 = 0.17 >> threshold
+    void scan_detectsCycleB_whenBid1ExceedsAsk2xAsk3() {
+        // edgeB = bid_EURUSD − ask_EURGBP × ask_GBPUSD = 1.090 − 0.861×1.261 ≈ 0.004 > threshold
+        var tri = cfg("EURUSD", "EURGBP", "GBPUSD", "B");
+        var repo = mock(TriangleConfigRepository.class);
+        when(repo.findByStatus("ACTIVE")).thenReturn(List.of(tri));
+        when(repo.findAll()).thenReturn(List.of(tri));
+
         var feed = feedWith(
-            "EURUSD", 1.0800, 1.0801,
-            "USDJPY", 150.00, 150.01,
-            "EURJPY", 162.20, 162.30
+            "EURUSD", 1.090, 1.091,
+            "EURGBP", 0.860, 0.861,
+            "GBPUSD", 1.260, 1.261
         );
-        var signal = engine(feed).scanForOpportunities();
+        var signal = engine(repo, feed).scanForOpportunities();
 
         assertThat(signal).isPresent();
         assertThat(signal.get().cycle()).isEqualTo("B");
+        assertThat(signal.get().profit()).isGreaterThan(THRESHOLD);
+    }
+
+    // ── cycle C (BUY,SELL,BUY): edgeC = bid1×bid3 − ask2 ─────────────────────
+
+    @Test
+    void scan_detectsCycleC_whenBid1xBid3ExceedsAsk2() {
+        // edgeC = bid_EURUSD × bid_USDCHF − ask_EURCHF = 1.08×0.905 − 0.978 = 0.9774 − 0.978 < 0
+        // use: 1.085 × 0.91 − 0.977 = 0.9874 − 0.977 = 0.010 > threshold
+        var tri = cfg("EURUSD", "EURCHF", "USDCHF", "C");
+        var repo = mock(TriangleConfigRepository.class);
+        when(repo.findByStatus("ACTIVE")).thenReturn(List.of(tri));
+        when(repo.findAll()).thenReturn(List.of(tri));
+
+        var feed = feedWith(
+            "EURUSD", 1.085, 1.086,
+            "EURCHF", 0.977, 0.978,
+            "USDCHF", 0.910, 0.911
+        );
+        var signal = engine(repo, feed).scanForOpportunities();
+
+        assertThat(signal).isPresent();
+        assertThat(signal.get().cycle()).isEqualTo("C");
+        assertThat(signal.get().profit()).isGreaterThan(THRESHOLD);
+    }
+
+    // ── cycle D (SELL,BUY,SELL): edgeD = bid2 − ask1×ask3 ────────────────────
+
+    @Test
+    void scan_detectsCycleD_whenBid2ExceedsAsk1xAsk3() {
+        // edgeD = bid_EURCHF − ask_USDCHF × ask_EURUSD = 0.979 − 0.911×1.073 = 0.979 − 0.978 = 0.001 > threshold
+        var tri = cfg("USDCHF", "EURCHF", "EURUSD", "D");
+        var repo = mock(TriangleConfigRepository.class);
+        when(repo.findByStatus("ACTIVE")).thenReturn(List.of(tri));
+        when(repo.findAll()).thenReturn(List.of(tri));
+
+        var feed = feedWith(
+            "USDCHF", 0.910, 0.911,
+            "EURCHF", 0.979, 0.980,
+            "EURUSD", 1.072, 1.073
+        );
+        var signal = engine(repo, feed).scanForOpportunities();
+
+        assertThat(signal).isPresent();
+        assertThat(signal.get().cycle()).isEqualTo("D");
         assertThat(signal.get().profit()).isGreaterThan(THRESHOLD);
     }
 

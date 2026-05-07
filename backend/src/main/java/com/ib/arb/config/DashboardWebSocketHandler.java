@@ -1,6 +1,13 @@
 package com.ib.arb.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ib.arb.analytics.AnalyticsService;
+import com.ib.arb.broker.KrakenOrderClient;
+import com.ib.arb.execution.AutoTrader;
+import com.ib.arb.execution.DashboardSnapshot;
+import com.ib.arb.marketdata.CurrencyRateFeed;
+import com.ib.arb.repository.TradeRepository;
+import com.ib.arb.scanner.ArbitrageEngine;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -17,11 +24,30 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper mapper = new ObjectMapper();
     private volatile String lastPayload = null;
 
+    private final AnalyticsService analytics;
+    private final KrakenOrderClient broker;
+    private final TradeRepository tradeRepo;
+    private final ArbitrageEngine arbitrageEngine;
+    private final CurrencyRateFeed currencyRateFeed;
+    private final AutoTrader autoTrader;
+
+    public DashboardWebSocketHandler(AnalyticsService analytics,
+                                     KrakenOrderClient broker,
+                                     TradeRepository tradeRepo,
+                                     ArbitrageEngine arbitrageEngine,
+                                     CurrencyRateFeed currencyRateFeed,
+                                     AutoTrader autoTrader) {
+        this.analytics = analytics;
+        this.broker = broker;
+        this.tradeRepo = tradeRepo;
+        this.arbitrageEngine = arbitrageEngine;
+        this.currencyRateFeed = currencyRateFeed;
+        this.autoTrader = autoTrader;
+    }
+
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         sessions.add(session);
-        // Send the last known snapshot immediately so the client doesn't
-        // have to wait for the next scheduler tick.
         if (lastPayload != null) {
             try { session.sendMessage(new TextMessage(lastPayload)); }
             catch (Exception ignored) {}
@@ -33,7 +59,19 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
         sessions.remove(session);
     }
 
-    public void broadcast(Object payload) {
+    public void broadcast() {
+        send(new DashboardSnapshot(
+            analytics.dailyProfitAndLoss(),
+            broker.isConnected(),
+            autoTrader.getStats(),
+            tradeRepo.findTop20ByOrderByTimeDesc(),
+            arbitrageEngine.currentSnapshots(),
+            autoTrader.isExecuting(),
+            currencyRateFeed.getAllRates()
+        ));
+    }
+
+    private void send(Object payload) {
         try {
             lastPayload = mapper.writeValueAsString(payload);
             var message = new TextMessage(lastPayload);

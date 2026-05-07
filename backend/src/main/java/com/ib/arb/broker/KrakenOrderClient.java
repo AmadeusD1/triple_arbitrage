@@ -137,7 +137,9 @@ public class KrakenOrderClient {
      * <p>Order directions per cycle:
      * <ul>
      *   <li><b>Cycle A</b>: BUY pair1, BUY pair2, SELL pair3</li>
-     *   <li><b>Cycle B</b>: SELL pair1, SELL pair2, BUY pair3</li>
+     *   <li><b>Cycle B</b>: BUY pair1, SELL pair2, SELL pair3</li>
+     *   <li><b>Cycle C</b>: BUY pair1, SELL pair2, BUY pair3</li>
+     *   <li><b>Cycle D</b>: SELL pair1, BUY pair2, SELL pair3</li>
      * </ul>
      *
      * <p>Execution stops at the first failed order. If leg 2 fails, leg 3 is not attempted
@@ -153,7 +155,7 @@ public class KrakenOrderClient {
         var meta = buildLegMeta(signal, orderSizeUsd);
         if (meta.isEmpty()) return List.of();
         return placeOrderLegs(
-            meta.stream()
+            meta.parallelStream()
                 .map(l -> new OrderLeg(l.legIndex(), l.pair(), l.direction(), l.price(), l.volume()))
                 .toList()
         );
@@ -187,11 +189,14 @@ public class KrakenOrderClient {
      */
     private List<LegMeta> buildLegMeta(Signal signal, double orderSizeUsd) {
         var config = signal.config();
-        var cycleA = "A".equals(signal.cycle());
         var pairs = new String[]{ config.getPair1(), config.getPair2(), config.getPair3() };
-        var directions = cycleA
-            ? new String[]{ "BUY", "BUY", "SELL" }
-            : new String[]{ "SELL", "SELL", "BUY" };
+        var directions = switch (signal.cycle()) {
+            case "A" -> new String[]{ "BUY", "BUY", "SELL" };
+            case "B" -> new String[]{ "BUY", "SELL", "SELL" };
+            case "C" -> new String[]{ "BUY", "SELL", "BUY" };
+            case "D" -> new String[]{ "SELL", "BUY", "SELL" };
+            default  -> throw new IllegalArgumentException("Unknown cycle: " + signal.cycle());
+        };
 
         var legs = new ArrayList<LegMeta>();
         for (int i = 0; i < 3; i++) {

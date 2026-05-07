@@ -1,11 +1,10 @@
 package com.ib.arb.execution;
 
 import com.ib.arb.alert.AlertService;
-import com.ib.arb.analytics.AnalyticsService;
 import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.broker.KrakenOrderClient.LegResult;
-import com.ib.arb.config.DashboardWebSocketHandler;
 import com.ib.arb.marketdata.Exchange;
+import com.ib.arb.marketdata.CurrencyRateFeed;
 import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TriangleConfig;
@@ -21,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,9 +36,8 @@ class AutoTraderTest {
     KrakenOrderClient broker                 = mock(KrakenOrderClient.class);
     TradeRepository tradeRepo                = mock(TradeRepository.class);
     AlertService alerts                      = mock(AlertService.class);
-    AnalyticsService analytics               = mock(AnalyticsService.class);
-    DashboardWebSocketHandler ws             = mock(DashboardWebSocketHandler.class);
     TriangleConfigRepository triangleRepo    = mock(TriangleConfigRepository.class);
+    CurrencyRateFeed currencyRateFeed                   = mock(CurrencyRateFeed.class);
 
     AutoTrader autoTrader;
 
@@ -67,19 +66,21 @@ class AutoTraderTest {
     @BeforeEach
     void setup() {
         autoTrader = new AutoTrader(arbitrageEngine, positions, risk, broker,
-                                    tradeRepo, alerts, analytics, ws, triangleRepo);
+                                    tradeRepo, alerts, triangleRepo, currencyRateFeed);
+        when(currencyRateFeed.getAllRates()).thenReturn(Map.of());
+        when(currencyRateFeed.getRate(anyString())).thenReturn(1.0);
         ReflectionTestUtils.setField(autoTrader, "orderSizeUsd", 100_000.0);
         ReflectionTestUtils.setField(autoTrader, "maxOpenOrders", 1);
         ReflectionTestUtils.setField(autoTrader, "tradeCooldownMs", 0L);
 
         when(tradeRepo.findTop20ByOrderByTimeDesc()).thenReturn(List.of());
-        when(analytics.dailyProfitAndLoss()).thenReturn(0.0);
         when(broker.isConnected()).thenReturn(true);
         when(arbitrageEngine.currentSnapshots()).thenReturn(List.of(
             new PriceSnapshot("KRAKEN", "EURUSD", 1.0800, 1.0801),
             new PriceSnapshot("KRAKEN", "USDJPY", 150.00, 150.01),
             new PriceSnapshot("KRAKEN", "EURJPY", 162.00, 162.10)
         ));
+        when(positions.getAvailableAmount(any(), anyString())).thenReturn(200_000.0);
         when(risk.checkProfit(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
             .thenReturn(RiskService.RiskResult.ok());
         when(tradeRepo.save(any())).thenAnswer(inv -> {

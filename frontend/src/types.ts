@@ -1,4 +1,4 @@
-export type CycleDirection = 'A' | 'B';
+export type CycleDirection = 'A' | 'B' | 'C' | 'D';
 export type LegDirection = 'BUY' | 'SELL';
 export type TradeStatus = 'FILLED' | 'CANCELLED' | 'SIMULATION';
 export type LegStatus = 'FILLED' | 'FAILED' | 'SIMULATED';
@@ -49,6 +49,7 @@ export interface DashboardSnapshot {
   recentTrades: Trade[];
   prices: PriceSnapshot[];
   tradeInProgress: boolean;
+  fxRates: Record<string, number>;
 }
 
 export interface EquityPoint {
@@ -124,4 +125,5 @@ export interface TriangleConfig {
   status: TriangleStatus;
   hits: number;
   totalProfitUsd: number;
+  cycle: string;
 }
