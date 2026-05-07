@@ -9,8 +9,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.ib.arb.scanner.Cycle;
 import java.util.List;
-import java.util.Set;
 
 @RestController
 @RequestMapping("/api/arbitrage")
@@ -52,8 +52,9 @@ public class ArbitrageController {
             req.triangleId(),
             req.legs() == null ? "-" : req.legs().stream().map(l -> l.pair()).reduce((a, b) -> a + "/" + b).orElse("-"),
             req.cycle(), req.legs() == null ? 0 : req.legs().size());
-        if (!Set.of("A", "B", "C", "D").contains(req.cycle()))
+        try { Cycle.valueOf(req.cycle()); } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
+        }
         if (req.legs() == null || req.legs().isEmpty())
             return ResponseEntity.badRequest().build();
         return triangleConfigRepo.findById(req.triangleId())

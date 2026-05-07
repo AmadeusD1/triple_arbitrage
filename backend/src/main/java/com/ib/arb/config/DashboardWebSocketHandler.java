@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ib.arb.analytics.AnalyticsService;
 import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.execution.AutoTrader;
-import com.ib.arb.execution.DashboardSnapshot;
 import com.ib.arb.marketdata.CurrencyRateFeed;
 import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.scanner.ArbitrageEngine;

@@ -3,6 +3,7 @@ package com.ib.arb.api;
 import com.ib.arb.analytics.AnalyticsService;
 import com.ib.arb.execution.AutoTrader;
 import com.ib.arb.repository.TradeRepository;
+import static com.ib.arb.common.Constants.TradeStatus.FILLED;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -60,7 +61,7 @@ public class StatsController {
 
         var avgLatency = trades.stream().mapToDouble(t -> t.getLatencyMs()).average().orElse(0);
         var maxLatency = trades.stream().mapToDouble(t -> t.getLatencyMs()).max().orElse(0);
-        var fillRate = trades.stream().filter(t -> "FILLED".equals(t.getStatus())).count()
+        var fillRate = trades.stream().filter(t -> FILLED.equals(t.getStatus())).count()
             * 100.0 / trades.size();
 
         return ResponseEntity.ok(Map.of(

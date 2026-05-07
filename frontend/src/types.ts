@@ -1,4 +1,4 @@
-export type CycleDirection = 'A' | 'B' | 'C' | 'D';
+export type CycleDirection = 'BBS' | 'BSS' | 'BSB' | 'SBS';
 export type LegDirection = 'BUY' | 'SELL';
 export type TradeStatus = 'FILLED' | 'CANCELLED' | 'SIMULATION';
 export type LegStatus = 'FILLED' | 'FAILED' | 'SIMULATED';

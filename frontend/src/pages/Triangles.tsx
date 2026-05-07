@@ -3,13 +3,13 @@ import {
   Alert, Box, Button, Chip, Container, Dialog, DialogActions, DialogContent,
   DialogTitle, IconButton, Paper, Snackbar, Switch, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup,
-  Typography,
+  Tooltip, Typography,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { getTriangles, createTriangle, updateTriangle, deleteTriangle, manualTrade } from '../api/rest';
-import type { OrderLeg, PriceSnapshot, TriangleConfig, TriangleStatus } from '../types';
+import type { CycleDirection, OrderLeg, PriceSnapshot, TriangleConfig, TriangleStatus } from '../types';
 
 interface Props { prices: PriceSnapshot[] }
 
@@ -17,19 +17,26 @@ type TrianglePayload = Omit<TriangleConfig, 'id' | 'hits' | 'totalProfitUsd'>;
 
 const EMPTY_FORM: TrianglePayload = {
   exchange: 'KRAKEN', pair1: '', pair2: '', pair3: '',
-  minProfitUsd: 10, minProfitPercent: 0.01, status: 'ACTIVE', cycle: 'A',
+  minProfitUsd: 10, minProfitPercent: 0.01, status: 'ACTIVE', cycle: 'BBS',
 };
 
 interface SnackState { open: boolean; message: string; severity: 'success' | 'info' | 'error' }
 
-const CYCLE_DIRS: Record<string, string[]> = {
-  A: ['BUY', 'BUY', 'SELL'],
-  B: ['SELL', 'SELL', 'BUY'],
-  C: ['BUY', 'SELL', 'BUY'],
-  D: ['SELL', 'BUY', 'SELL'],
+const CYCLE_DESCRIPTIONS: Record<string, string> = {
+  BBS: 'BUY / BUY / SELL',
+  BSS: 'BUY / SELL / SELL',
+  BSB: 'BUY / SELL / BUY',
+  SBS: 'SELL / BUY / SELL',
 };
 
-function computeLegs(t: TriangleConfig, cycle: 'A' | 'B' | 'C' | 'D', size: number, prices: PriceSnapshot[]): OrderLeg[] {
+const CYCLE_DIRS: Record<string, string[]> = {
+  BBS: ['BUY', 'BUY', 'SELL'],
+  BSS: ['BUY', 'SELL', 'SELL'],
+  BSB: ['BUY', 'SELL', 'BUY'],
+  SBS: ['SELL', 'BUY', 'SELL'],
+};
+
+function computeLegs(t: TriangleConfig, cycle: CycleDirection, size: number, prices: PriceSnapshot[]): OrderLeg[] {
   const dirs = CYCLE_DIRS[cycle];
   return [t.pair1, t.pair2, t.pair3].map((pair, i) => {
     const snap = prices.find(p => p.pair === pair);
@@ -45,7 +52,7 @@ export default function Triangles({ prices }: Props) {
   const [form, setForm] = useState<TrianglePayload>(EMPTY_FORM);
 
   const [tradeTarget, setTradeTarget] = useState<TriangleConfig | null>(null);
-  const [tradeCycle, setTradeCycle] = useState<'A' | 'B' | 'C' | 'D'>('A');
+  const [tradeCycle, setTradeCycle] = useState<CycleDirection>('BBS');
   const [legs, setLegs] = useState<OrderLeg[]>([]);
   const [snack, setSnack] = useState<SnackState>({ open: false, message: '', severity: 'success' });
 
@@ -56,12 +63,12 @@ export default function Triangles({ prices }: Props) {
 
   const openTradeDialog = (t: TriangleConfig) => {
     setTradeTarget(t);
-    const cycle = (t.cycle as 'A' | 'B' | 'C' | 'D') ?? 'A';
+    const cycle = (t.cycle as CycleDirection) ?? 'BBS';
     setTradeCycle(cycle);
     setLegs(computeLegs(t, cycle, DEFAULT_SIZE, prices));
   };
 
-  const handleCycleChange = (cycle: 'A' | 'B' | 'C' | 'D') => {
+  const handleCycleChange = (cycle: CycleDirection) => {
     setTradeCycle(cycle);
     if (tradeTarget) setLegs(computeLegs(tradeTarget, cycle, DEFAULT_SIZE, prices));
   };
@@ -137,7 +144,11 @@ export default function Triangles({ prices }: Props) {
                 <TableRow key={t.id}>
                   <TableCell>{t.exchange}</TableCell>
                   <TableCell><Chip label={`${t.pair1} / ${t.pair2} / ${t.pair3}`} size="small" variant="outlined" /></TableCell>
-                  <TableCell><Chip label={t.cycle} size="small" /></TableCell>
+                  <TableCell>
+                    <Tooltip title={CYCLE_DESCRIPTIONS[t.cycle] ?? t.cycle} placement="right">
+                      <Chip label={t.cycle} size="small" />
+                    </Tooltip>
+                  </TableCell>
                   <TableCell align="right">{t.minProfitPercent.toFixed(5)}</TableCell>
                   <TableCell align="right">${t.minProfitUsd.toFixed(2)}</TableCell>
                   <TableCell align="right">{t.hits}</TableCell>
@@ -177,7 +188,18 @@ export default function Triangles({ prices }: Props) {
             {textField('pair3', 'Pair 3 (e.g. EURJPY)')}
             {textField('minProfitPercent', 'Min Profit % (e.g. 0.00025)', 'number')}
             {textField('minProfitUsd', 'Min Profit USD', 'number')}
-            {textField('cycle', 'Cycle (A / B / C / D)')}
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Cycle</Typography>
+              <ToggleButtonGroup value={form.cycle} exclusive size="small"
+                onChange={(_, v) => { if (v) setForm(f => ({ ...f, cycle: v })); }}>
+                {(['BBS', 'BSS', 'BSB', 'SBS'] as const).map(c => (
+                  <ToggleButton key={c} value={c} sx={{ flexDirection: 'column', px: 2, py: 0.5 }}>
+                    <span>{c}</span>
+                    <Typography variant="caption" sx={{ opacity: 0.7 }}>{CYCLE_DESCRIPTIONS[c]}</Typography>
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+            </Box>
           </Box>
         </DialogContent>
         <DialogActions>
@@ -192,11 +214,13 @@ export default function Triangles({ prices }: Props) {
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
             <ToggleButtonGroup value={tradeCycle} exclusive size="small"
-              onChange={(_, v) => { if (v) handleCycleChange(v as 'A' | 'B' | 'C' | 'D'); }}>
-              <ToggleButton value="A">Cycle A</ToggleButton>
-              <ToggleButton value="B">Cycle B</ToggleButton>
-              <ToggleButton value="C">Cycle C</ToggleButton>
-              <ToggleButton value="D">Cycle D</ToggleButton>
+              onChange={(_, v) => { if (v) handleCycleChange(v as CycleDirection); }}>
+              {(['BBS', 'BSS', 'BSB', 'SBS'] as const).map(c => (
+                <ToggleButton key={c} value={c} sx={{ flexDirection: 'column', px: 2, py: 0.5 }}>
+                  <span>{c}</span>
+                  <Typography variant="caption" sx={{ opacity: 0.7 }}>{CYCLE_DESCRIPTIONS[c]}</Typography>
+                </ToggleButton>
+              ))}
             </ToggleButtonGroup>
 
             {/* Per-leg table */}

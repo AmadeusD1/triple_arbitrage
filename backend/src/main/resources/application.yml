@@ -12,7 +12,7 @@ arb:
   order-size-usd: 100000
   edge-threshold: 0.00025
   max-open-orders: 1
-  scan-interval-ms: 5000
+  scan-interval-ms: 1000
   trade-cooldown-ms: 10000
   broadcast-interval-ms: 1000
 

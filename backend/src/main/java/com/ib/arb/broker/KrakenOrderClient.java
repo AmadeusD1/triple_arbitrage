@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ib.arb.marketdata.KrakenOrderBookFeed;
 import com.ib.arb.repository.SettingRepository;
 import com.ib.arb.scanner.Signal;
+import static com.ib.arb.common.Constants.Direction.BUY;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -190,19 +191,13 @@ public class KrakenOrderClient {
     private List<LegMeta> buildLegMeta(Signal signal, double orderSizeUsd) {
         var config = signal.config();
         var pairs = new String[]{ config.getPair1(), config.getPair2(), config.getPair3() };
-        var directions = switch (signal.cycle()) {
-            case "A" -> new String[]{ "BUY", "BUY", "SELL" };
-            case "B" -> new String[]{ "BUY", "SELL", "SELL" };
-            case "C" -> new String[]{ "BUY", "SELL", "BUY" };
-            case "D" -> new String[]{ "SELL", "BUY", "SELL" };
-            default  -> throw new IllegalArgumentException("Unknown cycle: " + signal.cycle());
-        };
+        var directions = signal.cycle().dirs;
 
         var legs = new ArrayList<LegMeta>();
         for (int i = 0; i < 3; i++) {
             var snapshot = feed.getSnapshot(pairs[i]);
             if (snapshot == null) return List.of();
-            var price = "BUY".equals(directions[i]) ? snapshot.ask() : snapshot.bid();
+            var price = BUY.equals(directions[i]) ? snapshot.ask() : snapshot.bid();
             legs.add(new LegMeta(i + 1, pairs[i], directions[i], price, orderSizeUsd / price));
         }
         return legs;

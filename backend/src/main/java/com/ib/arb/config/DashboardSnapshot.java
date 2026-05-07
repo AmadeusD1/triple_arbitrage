@@ -1,5 +1,6 @@
-package com.ib.arb.execution;
+package com.ib.arb.config;
 
+import com.ib.arb.execution.AutoTrader;
 import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.Trade;
 

@@ -58,18 +58,18 @@ CREATE TABLE IF NOT EXISTS "triangles" (
     "status"             TEXT             NOT NULL DEFAULT 'ACTIVE',
     "hits"               BIGINT           NOT NULL DEFAULT 0,
     "total_profit_usd"   DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "cycle"              TEXT             NOT NULL DEFAULT 'A',
+    "cycle"              TEXT             NOT NULL DEFAULT 'BBS',
 
     CONSTRAINT "triangles_pkey" PRIMARY KEY ("id")
 );
 
--- cycle A (BUY,BUY,SELL): edge = bid1×bid2 − ask3
--- cycle B (BUY,SELL,SELL): edge = bid1 − ask2×ask3
--- cycle C (BUY,SELL,BUY):  edge = bid1×bid3 − ask2
--- cycle D (SELL,BUY,SELL): edge = bid2 − ask1×ask3
+-- cycle BBS (BUY,BUY,SELL): edge = bid1×bid2 − ask3
+-- cycle BSS (BUY,SELL,SELL): edge = bid1 − ask2×ask3
+-- cycle BSB (BUY,SELL,BUY):  edge = bid1×bid3 − ask2
+-- cycle SBS (SELL,BUY,SELL): edge = bid2 − ask1×ask3
 INSERT INTO "triangles" ("exchange","pair1","pair2","pair3","min_profit_usd","min_profit_percent","status","hits","total_profit_usd","cycle") VALUES
-    ('KRAKEN','GBPUSD','EURGBP','EURUSD', 10,0.01,'ACTIVE',0,0,'A'),
-    ('KRAKEN','EURUSD','EURGBP','GBPUSD', 10,0.01,'ACTIVE',0,0,'B'),
-    ('KRAKEN','EURUSD','EURCHF','USDCHF', 10,0.01,'ACTIVE',0,0,'C'),
-    ('KRAKEN','USDCHF','EURCHF','EURUSD', 10,0.01,'ACTIVE',0,0,'D')
+    ('KRAKEN','GBPUSD','EURGBP','EURUSD', 10,0.01,'ACTIVE',0,0,'BBS'),
+    ('KRAKEN','EURUSD','EURGBP','GBPUSD', 10,0.01,'ACTIVE',0,0,'BSS'),
+    ('KRAKEN','EURUSD','EURCHF','USDCHF', 10,0.01,'ACTIVE',0,0,'BSB'),
+    ('KRAKEN','USDCHF','EURCHF','EURUSD', 10,0.01,'ACTIVE',0,0,'SBS')
 ON CONFLICT DO NOTHING;

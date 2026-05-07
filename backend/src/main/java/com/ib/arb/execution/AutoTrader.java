@@ -12,7 +12,14 @@ import com.ib.arb.position.PositionService;
 import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.risk.RiskService;
+import static com.ib.arb.common.Constants.Direction.BUY;
+import static com.ib.arb.common.Constants.LegStatus.FAILED;
+import static com.ib.arb.common.Constants.LegStatus.SIMULATED;
+import static com.ib.arb.common.Constants.TradeStatus.CANCELLED;
+import static com.ib.arb.common.Constants.TradeStatus.FILLED;
+import static com.ib.arb.common.Constants.TradeStatus.SIMULATION;
 import com.ib.arb.scanner.ArbitrageEngine;
+import com.ib.arb.scanner.Cycle;
 import com.ib.arb.scanner.Signal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -118,7 +125,7 @@ public class AutoTrader {
         var effectiveOrderSize = computeEffectiveOrderSize(s);
         log.info("[ARB] Effective order size — {}", String.format("%.2f", effectiveOrderSize));
 
-        var v = validatePreExecution(s.exchange(), s.config(), s.cycle(), effectiveOrderSize, s.profit());
+        var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), effectiveOrderSize, s.profit());
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
                 case "REJECTED_BALANCE" -> log.warn("[ARB] Missed — insufficient balance for triangle={} cycle={}",
@@ -158,18 +165,12 @@ public class AutoTrader {
 
     private double computeEffectiveOrderSize(Signal s) {
         var pairs = new String[]{ s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
-        var dirs  = switch (s.cycle()) {
-            case "A" -> new String[]{ "BUY", "BUY", "SELL" };
-            case "B" -> new String[]{ "BUY", "SELL", "SELL" };
-            case "C" -> new String[]{ "BUY", "SELL", "BUY" };
-            case "D" -> new String[]{ "SELL", "BUY", "SELL" };
-            default  -> throw new IllegalArgumentException("Unknown cycle: " + s.cycle());
-        };
+        var dirs  = s.cycle().dirs;
 
         // Pass 1: min available balance in USD across all three spent currencies
         var minBalanceUsd = Double.MAX_VALUE;
         for (int i = 0; i < 3; i++) {
-            var isBuy    = "BUY".equals(dirs[i]);
+            var isBuy    = BUY.equals(dirs[i]);
             var spentCcy = isBuy ? pairs[i].substring(3) : pairs[i].substring(0, 3);
             var avail    = positions.getAvailableAmount(s.exchange(), spentCcy);
             minBalanceUsd = Math.min(minBalanceUsd, avail * getUSDValue(spentCcy));
@@ -212,11 +213,11 @@ public class AutoTrader {
         // Derive notional size from leg 1 (price × volume) for balance and risk checks
         var notional = legs.get(0).price() * legs.get(0).volume();
         var edge = switch (cycle) {
-            case "A" -> legs.get(0).price() * legs.get(1).price() - legs.get(2).price();
-            case "B" -> legs.get(0).price() - legs.get(1).price() * legs.get(2).price();
-            case "C" -> legs.get(0).price() * legs.get(2).price() - legs.get(1).price();
-            case "D" -> legs.get(1).price() - legs.get(0).price() * legs.get(2).price();
-            default  -> 0.0;
+            case "BBS" -> legs.get(0).price() * legs.get(1).price() - legs.get(2).price();
+            case "BSS" -> legs.get(0).price() - legs.get(1).price() * legs.get(2).price();
+            case "BSB" -> legs.get(0).price() * legs.get(2).price() - legs.get(1).price();
+            case "SBS" -> legs.get(1).price() - legs.get(0).price() * legs.get(2).price();
+            default    -> 0.0;
         };
 
         var v = validatePreExecution(exchange, config, cycle, notional, edge);
@@ -248,7 +249,7 @@ public class AutoTrader {
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
         var estimatedPnl = filled ? edge * notional : 0.0;
-        var signal = new Signal(exchange, config, cycle, edge);
+        var signal = new Signal(exchange, config, Cycle.valueOf(cycle), edge);
 
         var trade = finalizeExecution(signal, legResults, latencyMs, estimatedPnl, filled, "MANUAL", false);
         return new ManualTradeResult(trade.getId(), trade.getStatus(), estimatedPnl);
@@ -292,6 +293,7 @@ public class AutoTrader {
 
         var trade = buildTrade(signal, legResults, latencyMs, estimatedPnl, filled);
         tradeRepo.save(trade);
+        positions.refreshBalances(signal.exchange());
 
         if (filled) {
             executed++;
@@ -311,19 +313,13 @@ public class AutoTrader {
     private boolean hasBalanceForAllLegs(Exchange exchange, TriangleConfig config,
                                           String cycle, double orderSize) {
         var pairs = new String[]{ config.getPair1(), config.getPair2(), config.getPair3() };
-        var dirs  = switch (cycle) {
-            case "A" -> new String[]{ "BUY", "BUY", "SELL" };
-            case "B" -> new String[]{ "BUY", "SELL", "SELL" };
-            case "C" -> new String[]{ "BUY", "SELL", "BUY" };
-            case "D" -> new String[]{ "SELL", "BUY", "SELL" };
-            default  -> throw new IllegalArgumentException("Unknown cycle: " + cycle);
-        };
+        var dirs  = Cycle.valueOf(cycle).dirs;
 
         var snapshots = arbitrageEngine.currentSnapshots();
 
         for (int i = 0; i < 3; i++) {
             var pair  = pairs[i];
-            var isBuy = "BUY".equals(dirs[i]);
+            var isBuy = BUY.equals(dirs[i]);
             var ccy   = isBuy ? pair.substring(3) : pair.substring(0, 3);
 
             var price = snapshots.stream()
@@ -345,17 +341,17 @@ public class AutoTrader {
                              long latencyMs, double estimatedPnl, boolean filled) {
         var trade = new Trade()
             .setTime(LocalDateTime.now())
-            .setDirection(signal.cycle())
+            .setDirection(signal.cycle().name())
             .setSpread(signal.profit())
             .setPnl(estimatedPnl)
-            .setStatus(broker.isSimulation() ? "SIMULATION" : filled ? "FILLED" : "CANCELLED")
+            .setStatus(broker.isSimulation() ? SIMULATION : filled ? FILLED : CANCELLED)
             .setLatencyMs(latencyMs);
 
         legResults.forEach(lr -> {
             log.info("[TRADE] Leg {} — {} {} price={} volume={} status={} orderId={}",
                 lr.legIndex(), lr.direction(), lr.pair(),
                 lr.price(), String.format("%.6f", lr.volume()),
-                broker.isSimulation() ? "SIMULATED" : lr.filled() ? "FILLED" : "FAILED",
+                broker.isSimulation() ? SIMULATED : lr.filled() ? FILLED : FAILED,
                 lr.orderId() != null ? lr.orderId() : "-");
             trade.addLeg(new TradeLeg()
                 .setLegIndex(lr.legIndex())
@@ -363,7 +359,7 @@ public class AutoTrader {
                 .setDirection(lr.direction())
                 .setPrice(lr.price())
                 .setVolume(lr.volume())
-                .setStatus(broker.isSimulation() ? "SIMULATED" : lr.filled() ? "FILLED" : "FAILED")
+                .setStatus(broker.isSimulation() ? SIMULATED : lr.filled() ? FILLED : FAILED)
                 .setOrderId(lr.orderId()));
         });
         log.info("[TRADE] Built — cycle={} spread={} pnl={} status={} latencyMs={}",

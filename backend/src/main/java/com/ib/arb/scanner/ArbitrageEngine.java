@@ -4,6 +4,7 @@ import com.ib.arb.marketdata.OrderBookFeed;
 import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.TriangleConfig;
 import com.ib.arb.repository.TriangleConfigRepository;
+import static com.ib.arb.common.Constants.TriangleStatus.ACTIVE;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
@@ -76,7 +77,7 @@ public class ArbitrageEngine {
      *         {@link Optional#empty()} if no profitable opportunity exists
      */
     public Optional<Signal> scanForOpportunities() {
-        var active = triangleRepo.findByStatus("ACTIVE");
+        var active = triangleRepo.findByStatus(ACTIVE);
         return feeds.stream()
             .flatMap(feed -> active.stream()
                 .map(config -> computeEdge(feed, config))
@@ -110,14 +111,13 @@ public class ArbitrageEngine {
         if (!b1.isValid() || !b2.isValid() || !b3.isValid()) return Optional.empty();
 
         var threshold = config.getMinProfitPercent();
-        var cycle = config.getCycle() != null ? config.getCycle() : "A";
+        var cycle = Cycle.valueOf(config.getCycle() != null ? config.getCycle() : "BBS");
 
         var edge = switch (cycle) {
-            case "A" -> b1.bid() * b2.bid() - b3.ask();
-            case "B" -> b1.bid() - b2.ask() * b3.ask();
-            case "C" -> b1.bid() * b3.bid() - b2.ask();
-            case "D" -> b2.bid() - b1.ask() * b3.ask();
-            default  -> Double.NEGATIVE_INFINITY;
+            case BBS -> b1.bid() * b2.bid() - b3.ask();
+            case BSS -> b1.bid() - b2.ask() * b3.ask();
+            case BSB -> b1.bid() * b3.bid() - b2.ask();
+            case SBS -> b2.bid() - b1.ask() * b3.ask();
         };
 
         if (edge > threshold) {

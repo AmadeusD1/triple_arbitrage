@@ -22,11 +22,12 @@ backend/
     broker/          # KrakenOrderClient, KrakenAuth (HMAC signing + shared nonce)
     marketdata/      # WebSocket order book feeds (KrakenOrderBookFeed + future sources)
     position/        # PositionClient interface, KrakenPositionClient, PositionService
-    scanner/         # ArbitrageEngine — triangle edge detection
+    common/          # Constants (Direction, TradeStatus, LegStatus, TriangleStatus)
+    scanner/         # ArbitrageEngine, Cycle enum, Signal — triangle edge detection
     execution/       # AutoTrader — orchestrates scan → risk → order → record
     risk/            # RiskService — position limit, daily loss hard-stop, profit threshold
     analytics/       # AnalyticsService — win rate, Sharpe, equity curve, daily P&L
-    scheduler/       # ArbitrageScheduler — @Scheduled loop
+    scheduler/       # ArbitrageScheduler — @Scheduled scan + broadcast loops
     alert/           # AlertService — email / desktop / SMS notifications
     api/             # REST controllers: ArbitrageController, AuthController, BrokerController,
                      #   OpenOrdersController, PositionsController, StatsController,
@@ -159,13 +160,22 @@ Key methods:
 - `hasAvailableBalance(exchange, isoCurrency, requiredAmount)` — boolean check used by `hasBalanceForAllLegs()`
 - `getAvailableAmount(exchange, isoCurrency)` — returns raw balance amount; used by `computeEffectiveOrderSize()` in `AutoTrader`
 
+### Cycle Enum (`scanner/Cycle.java`)
+
+Each triangle has exactly one cycle stored in its DB row (`cycle TEXT`). The `Cycle` enum encodes the direction array for that cycle:
+
+| Enum | Directions | Edge formula |
+|------|-----------|-------------|
+| `BBS` | BUY, BUY, SELL  | `bid1 × bid2 − ask3` |
+| `BSS` | BUY, SELL, SELL | `bid1 − ask2 × ask3` |
+| `BSB` | BUY, SELL, BUY  | `bid1 × bid3 − ask2` |
+| `SBS` | SELL, BUY, SELL | `bid2 − ask1 × ask3` |
+
+`Cycle.dirs` holds the direction array; Jackson serialises the enum by name so the frontend receives `"BBS"` etc.
+
 ### Edge Detection (ArbitrageEngine)
 
-For each triangle `(pair1, pair2, pair3)`:
-- **Cycle A:** `edge = bid1 × bid2 − ask3`
-- **Cycle B:** `edge = bid3 − ask1 × ask2`
-
-Valid when `edge > arb.edge-threshold` (default `0.00025`). `scanForOpportunities()` returns the single best `Signal` across all active triangles (loaded from DB each cycle).
+Loads active triangles from the DB each scan cycle. For each triangle, reads `config.getCycle()`, calls `Cycle.valueOf()`, evaluates the matching edge formula, and emits a `Signal` if `edge > config.getMinProfitPercent()`. `scanForOpportunities()` returns the single highest-profit `Signal` across all feeds and triangles.
 
 ### Execution Flow (AutoTrader)
 
@@ -174,7 +184,7 @@ Valid when `edge > arb.edge-threshold` (default `0.00025`). `scanForOpportunitie
 3. `computeEffectiveOrderSize(signal)` — dynamically sizes the order in two passes:
    - **Pass 1 (balance cap):** for each leg, get available balance of the spent currency (quote for BUY, base for SELL) via `PositionService.getAvailableAmount()`, convert to USD via `getUSDValue()`, take minimum × 0.95. Cap at `arb.order-size-usd`.
    - **Pass 2 (pair normalization):** for each pair, compute `effectiveOrderSize × getUSDValue(quoteCcy)` and take the minimum — ensures the actual USD notional is the same across all three legs.
-   - `getUSDValue(currency)` is a stub returning `1.0`; **fill in real FX rate lookup before going live.**
+   - `getUSDValue(currency)` delegates to `CurrencyRateFeed.getRate()`, which pulls live rates from the crypto-aggregator WebSocket (`currency.feed-url`).
 4. `hasBalanceForAllLegs()` — checks all 3 legs' spent currencies against live order book prices using `effectiveOrderSize`; BUY legs check quote currency, SELL legs check base currency (`effectiveOrderSize / bid`)
 5. `RiskService.check(effectiveOrderSize)` → position limit + daily loss hard-stop
 6. `RiskService.checkProfit(minPercent, minUsd, edge, estimatedPnl)` → per-triangle profit threshold
@@ -185,7 +195,7 @@ Valid when `edge > arb.edge-threshold` (default `0.00025`). `scanForOpportunitie
 ### Simulation Mode
 
 Controlled by the `simulation_mode` setting (1 = on, 0 = off; default 1 = safe). When on:
-- `AutoTrader` logs `[SIM] Cycle A | BUY EURUSD, BUY USDJPY, SELL EURJPY | profit=...`
+- `AutoTrader` logs `[SIM] Cycle BBS | BUY EURUSD, BUY USDJPY, SELL EURJPY | profit=...`
 - Trade is recorded as `SIMULATION` with leg status `SIMULATED`
 - No HTTP calls to Kraken
 - `KrakenOrderClient.isConnected()` returns `true` regardless of API credentials
@@ -193,7 +203,11 @@ Controlled by the `simulation_mode` setting (1 = on, 0 = off; default 1 = safe).
 
 ### Scheduler (ArbitrageScheduler)
 
-`@Scheduled(fixedDelayString = "${arb.scan-interval-ms}")` drives `AutoTrader.attemptArbitrage()`. Respects a `running` flag toggled by `/api/arbitrage/start` and `/api/arbitrage/stop`. When `running=false` it still calls `autoTrader.broadcast()` so the Prices tab stays live. Auto-starts on boot when simulation mode is enabled. Skips cycle if open orders ≥ `max-open-orders` (default `1`).
+Two `@Scheduled` methods:
+- `cycle()` — fires every `arb.scan-interval-ms`; runs `AutoTrader.attemptArbitrage()` when `running=true`
+- `broadcastCycle()` — fires every `arb.broadcast-interval-ms` (default 1 s); calls `DashboardWebSocketHandler.broadcast()` regardless of running state, keeping the Prices tab live
+
+Auto-starts on boot when simulation mode is enabled. Skips scan cycle if open orders ≥ `max-open-orders` (default `1`).
 
 ## Database Schema
 
@@ -202,7 +216,7 @@ Controlled by the `simulation_mode` setting (1 = on, 0 = off; default 1 = safe).
 |---|---|---|
 | id | BIGSERIAL PK | |
 | time | TIMESTAMP | |
-| direction | TEXT | `A` or `B` (cycle) |
+| direction | TEXT | cycle name: `BBS`, `BSS`, `BSB`, or `SBS` |
 | spread | DOUBLE | profit edge |
 | pnl | DOUBLE | estimated P&L in USD |
 | status | TEXT | `FILLED`, `CANCELLED`, or `SIMULATION` |
@@ -247,13 +261,14 @@ Admin user seeded on first startup by `DataInitializer` with `role = 'ADMIN'`. O
 | pair1 | TEXT | e.g. `EURUSD` |
 | pair2 | TEXT | e.g. `USDJPY` |
 | pair3 | TEXT | e.g. `EURJPY` |
+| cycle | TEXT | `BBS`, `BSS`, `BSB`, or `SBS` — default `BBS` |
 | min_profit_usd | DOUBLE | default `10` |
 | min_profit_percent | DOUBLE | default `0.01` (1%) |
 | status | TEXT | `ACTIVE` or `INACTIVE` |
 | hits | BIGINT | count of filled trades |
 | total_profit_usd | DOUBLE | cumulative P&L |
 
-Seven triangles seeded by default (all KRAKEN exchange). `TriangleConfigRepository.incrementStats()` atomically updates `hits` and `total_profit_usd` after each filled trade.
+Four triangles seeded by default (all KRAKEN exchange): GBPUSD/EURGBP/EURUSD (BBS), EURUSD/EURGBP/GBPUSD (BSS), EURUSD/EURCHF/USDCHF (BSB), USDCHF/EURCHF/EURUSD (SBS). `TriangleConfigRepository.incrementStats()` atomically updates `hits` and `total_profit_usd` after each filled trade.
 
 ## REST API
 
@@ -297,8 +312,9 @@ arb:
   order-size-usd: 100000
   edge-threshold: 0.00025
   max-open-orders: 1
-  scan-interval-ms: 5000
+  scan-interval-ms: 1000
   trade-cooldown-ms: 10000
+  broadcast-interval-ms: 1000
 
 kraken:
   ws-url: wss://ws.kraken.com/v2
@@ -306,11 +322,13 @@ kraken:
   api-secret: ${KRAKEN_API_SECRET:}
   position-cache-ttl-ms: 2000
 
+currency:
+  feed-url: ${CURRENCY_FEED_URL:ws://localhost:7070/api/ws/global}
+
 app:
   admin:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:admin}
-  frontend-url: ${FRONTEND_URL:http://localhost:5173}
 
 alert:
   email-from: ${ALERT_EMAIL_FROM:}
@@ -324,9 +342,16 @@ alert:
 |---|---|---|
 | `order-size-usd` | `100000` | **Maximum** notional USD trade size per cycle. `AutoTrader` computes a dynamic `effectiveOrderSize` per signal (capped at this value) based on available balances — see `computeEffectiveOrderSize()`. |
 | `edge-threshold` | `0.00025` | Minimum profit edge to consider an opportunity valid |
-| `scan-interval-ms` | `5000` | Milliseconds between scanner cycles |
+| `scan-interval-ms` | `1000` | Milliseconds between scanner cycles |
 | `trade-cooldown-ms` | `10000` | Cooldown after a trade before the next attempt |
 | `max-open-orders` | `1` | Maximum concurrent open orders allowed |
+| `broadcast-interval-ms` | `1000` | Milliseconds between WebSocket dashboard broadcasts |
+
+### `currency:` key reference
+
+| Key | Default | Description |
+|---|---|---|
+| `feed-url` | `ws://localhost:7070/api/ws/global` | WebSocket URL of the crypto-aggregator that pushes live FX rates. Used by `CurrencyRateFeed` to populate `getUSDValue()` in `AutoTrader`. |
 
 ## Frontend (React + TypeScript + MUI)
 
@@ -338,7 +363,7 @@ Single-page dashboard. Auth state managed by `AuthProvider` — on load, calls `
 | `QUANT` | Everything except Users |
 | `ADMIN` | Everything |
 
-**Shared types** (`src/types.ts`): `CycleDirection`, `LegDirection`, `TradeStatus`, `LegStatus`, `Trade`, `TradeLeg`, `TradeDetail`, `ArbitrageStats`, `DashboardSnapshot`, `EquityPoint`, `Setting`, `ExecutionStats`, `AnalyticsData`, `AuthUser` (`{username, role}`), `AppUser` (`{id, username, role}`), `PriceSnapshot`, `OrderLeg`, `TriangleStatus`, `TriangleConfig`, `BalanceEntry`, `OpenOrder`.
+**Shared types** (`src/types.ts`): `CycleDirection` (`'BBS'|'BSS'|'BSB'|'SBS'`), `LegDirection`, `TradeStatus`, `LegStatus`, `Trade`, `TradeLeg`, `TradeDetail`, `ArbitrageStats`, `DashboardSnapshot`, `EquityPoint`, `Setting`, `ExecutionStats`, `AnalyticsData`, `AuthUser` (`{username, role}`), `AppUser` (`{id, username, role}`), `PriceSnapshot`, `OrderLeg`, `TriangleStatus`, `TriangleConfig`, `BalanceEntry`, `OpenOrder`.
 
 **WebSocket** (`useDashboardSocket`): connects to `/ws/dashboard`, returns `DashboardSnapshot | null`.
 
@@ -350,6 +375,7 @@ interface DashboardSnapshot {
   recentTrades: Trade[];
   prices: PriceSnapshot[];
   tradeInProgress: boolean;
+  fxRates: Record<string, number>;   // live rates from CurrencyRateFeed, keyed "CCY/USD"
 }
 ```
 
@@ -359,7 +385,8 @@ interface DashboardSnapshot {
 - `Positions` — exchange balances (polls `/api/positions` every 5s)
 - `Open Orders` — live Kraken open orders (polls `/api/orders/open` every 5s)
 - `Feeds` — live bid/ask table, streamed via WebSocket
-- `Exchange Settings` — CRUD for triangle configs; play button opens manual trade dialog
+- `Currency Rates` — live FX rates from dashboard WebSocket (`fxRates` field)
+- `Exchange Settings` — CRUD for triangle configs; play button opens manual trade dialog with cycle selector (BBS/BSS/BSB/SBS)
 - `Settings` — position limit, max daily loss, simulation mode toggle
 - `Users` — user list with inline role editing (dropdown per row) + create form with role selector + delete; **visible to ADMIN only**
 - `Login` — username/password form
@@ -386,6 +413,15 @@ var signal = arbitrageEngine.scanForOpportunities();
 // fluent entity construction
 var trade = new Trade()
     .setTime(LocalDateTime.now())
-    .setDirection(signal.cycle())
-    .setStatus("SIMULATION");
+    .setDirection(signal.cycle().name())
+    .setStatus(TradeStatus.SIMULATION);
+```
+
+Use constants from `com.ib.arb.common.Constants` for domain string literals — prefer static imports for readability:
+
+```java
+import static com.ib.arb.common.Constants.Direction.BUY;
+import static com.ib.arb.common.Constants.TradeStatus.FILLED;
+import static com.ib.arb.common.Constants.LegStatus.SIMULATED;
+import static com.ib.arb.common.Constants.TriangleStatus.ACTIVE;
 ```
