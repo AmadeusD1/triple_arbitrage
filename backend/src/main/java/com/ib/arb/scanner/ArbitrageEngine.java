@@ -5,8 +5,11 @@ import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.TriangleConfig;
 import com.ib.arb.repository.TriangleConfigRepository;
 import static com.ib.arb.common.Constants.TriangleStatus.ACTIVE;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -24,6 +27,8 @@ import java.util.stream.Stream;
  */
 @Service
 public class ArbitrageEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(ArbitrageEngine.class);
 
     private final List<OrderBookFeed> feeds;
     private final TriangleConfigRepository triangleRepo;
@@ -78,12 +83,23 @@ public class ArbitrageEngine {
      */
     public Optional<Signal> scanForOpportunities() {
         var active = triangleRepo.findByStatus(ACTIVE);
-        return feeds.stream()
+        log.debug("[SCAN] Starting — {} active triangle(s) on {} feed(s)", active.size(), feeds.size());
+
+        var best = feeds.stream()
             .flatMap(feed -> active.stream()
                 .map(config -> computeEdge(feed, config))
                 .filter(Optional::isPresent)
                 .map(Optional::get))
             .max(Comparator.comparingDouble(Signal::profit));
+
+        if (best.isEmpty()) {
+            log.debug("[SCAN] No profitable opportunity found");
+        } else {
+            var s = best.get();
+            log.info("[SCAN] Best signal — triangle={} exchange={} cycle={} edge={}",
+                s.config().getId(), s.exchange(), s.cycle(), String.format("%.5f", s.profit()));
+        }
+        return best;
     }
 
     /**
@@ -100,6 +116,8 @@ public class ArbitrageEngine {
      */
     private Optional<Signal> computeEdge(OrderBookFeed feed, TriangleConfig config) {
         if (!feed.getExchange().name().equalsIgnoreCase(config.getExchange())) {
+            log.debug("[SCAN] Skipping triangle={} — exchange mismatch ({} vs {})",
+                config.getId(), feed.getExchange().name(), config.getExchange());
             return Optional.empty();
         }
 
@@ -107,8 +125,22 @@ public class ArbitrageEngine {
         var b2 = feed.getSnapshot(config.getPair2());
         var b3 = feed.getSnapshot(config.getPair3());
 
-        if (b1 == null || b2 == null || b3 == null) return Optional.empty();
-        if (!b1.isValid() || !b2.isValid() || !b3.isValid()) return Optional.empty();
+        if (b1 == null || b2 == null || b3 == null) {
+            var missing = new ArrayList<String>();
+            if (b1 == null) missing.add(config.getPair1());
+            if (b2 == null) missing.add(config.getPair2());
+            if (b3 == null) missing.add(config.getPair3());
+            log.warn("[SCAN] Triangle={} — no snapshot for pair(s): {}", config.getId(), missing);
+            return Optional.empty();
+        }
+        if (!b1.isValid() || !b2.isValid() || !b3.isValid()) {
+            var invalid = new ArrayList<String>();
+            if (!b1.isValid()) invalid.add(config.getPair1());
+            if (!b2.isValid()) invalid.add(config.getPair2());
+            if (!b3.isValid()) invalid.add(config.getPair3());
+            log.warn("[SCAN] Triangle={} — invalid snapshot for pair(s): {}", config.getId(), invalid);
+            return Optional.empty();
+        }
 
         var threshold = config.getMinProfitPercent();
         var cycle = Cycle.valueOf(config.getCycle() != null ? config.getCycle() : "BBS");
@@ -121,9 +153,13 @@ public class ArbitrageEngine {
         };
 
         if (edge > threshold) {
+            log.debug("[SCAN] Triangle={} cycle={} edge={} — PROFITABLE (threshold={})",
+                config.getId(), cycle, String.format("%.5f", edge), threshold);
             return Optional.of(new Signal(feed.getExchange(), config, cycle, edge));
         }
 
+        log.debug("[SCAN] Triangle={} cycle={} edge={} — below threshold {}",
+            config.getId(), cycle, String.format("%.5f", edge), threshold);
         return Optional.empty();
     }
 }

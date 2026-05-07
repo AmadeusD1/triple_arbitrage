@@ -106,6 +106,7 @@ public class AutoTrader {
 
         var signal = arbitrageEngine.scanForOpportunities();
         if (signal.isEmpty()) {
+            log.debug("[ARB] No opportunity found this cycle");
             return;
         }
 
@@ -176,6 +177,8 @@ public class AutoTrader {
             minBalanceUsd = Math.min(minBalanceUsd, avail * getUSDValue(spentCcy));
         }
         var effectiveOrderSize = Math.min(minBalanceUsd * 0.95, orderSizeUsd);
+        log.debug("[ARB] OrderSize pass1 — minBalanceUsd={} → capped={}",
+            String.format("%.2f", minBalanceUsd), String.format("%.2f", effectiveOrderSize));
 
         // Pass 2: normalize to the minimum USD amount across all three pair quote currencies
         var minLegUsd = effectiveOrderSize;
@@ -183,6 +186,8 @@ public class AutoTrader {
             var quoteCcy = pair.substring(3);
             minLegUsd = Math.min(minLegUsd, effectiveOrderSize * getUSDValue(quoteCcy));
         }
+        log.debug("[ARB] OrderSize pass2 — minLegUsd={} (final effectiveOrderSize={})",
+            String.format("%.2f", minLegUsd), String.format("%.2f", minLegUsd));
 
         return minLegUsd;
     }
@@ -294,6 +299,7 @@ public class AutoTrader {
         var trade = buildTrade(signal, legResults, latencyMs, estimatedPnl, filled);
         tradeRepo.save(trade);
         positions.refreshBalances(signal.exchange());
+        log.debug("[{}] Positions refreshed — exchange={}", logPrefix, signal.exchange());
 
         if (filled) {
             executed++;
@@ -328,11 +334,19 @@ public class AutoTrader {
                 .map(snap -> isBuy ? snap.ask() : snap.bid())
                 .orElse(0.0);
 
-            if (price == 0.0) return false;
+            if (price == 0.0) {
+                log.warn("[ARB] Balance check — no snapshot for pair={} exchange={}", pair, exchange);
+                return false;
+            }
 
             var required = isBuy ? orderSize : orderSize / price;
 
-            if (!positions.hasAvailableBalance(exchange, ccy, required)) return false;
+            if (!positions.hasAvailableBalance(exchange, ccy, required)) {
+                log.debug("[ARB] Balance check — {} {} required={} available={}",
+                    exchange, ccy, String.format("%.2f", required),
+                    String.format("%.2f", positions.getAvailableAmount(exchange, ccy)));
+                return false;
+            }
         }
         return true;
     }
