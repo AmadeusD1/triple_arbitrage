@@ -38,13 +38,19 @@ public class DataInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        if (userRepo.count() == 0) {
+        var existing = userRepo.findByUsername(adminUsername);
+        if (existing.isEmpty()) {
             var user = new User();
             user.setUsername(adminUsername);
             user.setPassword(passwordEncoder.encode(adminPassword));
             user.setRole("ADMIN");
             userRepo.save(user);
             log.info("Created admin user '{}'", adminUsername);
+        } else {
+            var user = existing.get();
+            user.setPassword(passwordEncoder.encode(adminPassword));
+            userRepo.save(user);
+            log.info("Updated password for admin user '{}'", adminUsername);
         }
 
         // Auto-start the scanner in simulation mode so the dashboard is live
