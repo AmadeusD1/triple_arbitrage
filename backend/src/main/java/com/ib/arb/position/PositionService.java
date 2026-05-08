@@ -1,6 +1,9 @@
 package com.ib.arb.position;
 
 import com.ib.arb.marketdata.Exchange;
+import static com.ib.arb.common.Constants.Simulation.SIMULATION_BALANCE;
+import static com.ib.arb.common.Constants.Simulation.SIMULATION_MODE_KEY;
+import com.ib.arb.repository.SettingRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,21 +27,23 @@ import java.util.stream.Collectors;
 public class PositionService {
 
     private static final Logger log = LoggerFactory.getLogger(PositionService.class);
-
     @Value("${kraken.position-cache-ttl-ms:2000}")
     private long cacheTtlMs;
 
     private final List<PositionClient> clients;
     private final TriangleConfigRepository triangleRepo;
+    private final SettingRepository settingRepo;
     private final Map<Exchange, Map<String, Double>> balanceCache = new ConcurrentHashMap<>();
     private final Map<Exchange, Long> lastRefreshed = new ConcurrentHashMap<>();
 
-    public PositionService(List<PositionClient> clients, TriangleConfigRepository triangleRepo) {
+    public PositionService(List<PositionClient> clients, TriangleConfigRepository triangleRepo, SettingRepository settingRepo) {
         this.clients = clients;
         this.triangleRepo = triangleRepo;
+        this.settingRepo = settingRepo;
     }
 
     public boolean hasAvailableBalance(Exchange exchange, String isoCurrency, double requiredAmount) {
+        if (isSimulation()) return true;
         if (isStale(exchange)) refreshBalances(exchange);
         var balances = balanceCache.getOrDefault(exchange, Map.of());
         var available = balances.getOrDefault(toAssetKey(exchange, isoCurrency), 0.0);
@@ -48,6 +53,7 @@ public class PositionService {
     }
 
     public double getAvailableAmount(Exchange exchange, String isoCurrency) {
+        if (isSimulation()) return SIMULATION_BALANCE;
         if (isStale(exchange)) refreshBalances(exchange);
         var balances = balanceCache.getOrDefault(exchange, Map.of());
         var key = toAssetKey(exchange, isoCurrency);
@@ -116,6 +122,12 @@ public class PositionService {
     }
 
     public record BalanceEntry(String exchange, String currency, String krakenKey, double amount) {}
+
+    private boolean isSimulation() {
+        return settingRepo.findById(SIMULATION_MODE_KEY)
+            .map(s -> s.getValue() == 1.0)
+            .orElse(true);
+    }
 
     private boolean isStale(Exchange exchange) {
         var last = lastRefreshed.get(exchange);

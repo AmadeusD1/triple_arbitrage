@@ -27,6 +27,12 @@ public final class Constants {
         private TriangleStatus() {}
     }
 
+    public static final class Simulation {
+        public static final String SIMULATION_MODE_KEY = "simulation_mode";
+        public static final double SIMULATION_BALANCE  = 10000.0;
+        private Simulation() {}
+    }
+
     public static final class RejectionStatus {
         public static final String REJECTED_BALANCE = "REJECTED_BALANCE";
         public static final String REJECTED_RISK    = "REJECTED_RISK";

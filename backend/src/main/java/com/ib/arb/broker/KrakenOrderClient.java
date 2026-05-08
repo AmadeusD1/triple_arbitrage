@@ -5,6 +5,7 @@ import com.ib.arb.marketdata.KrakenOrderBookFeed;
 import com.ib.arb.repository.SettingRepository;
 import com.ib.arb.scanner.Signal;
 import static com.ib.arb.common.Constants.Direction.BUY;
+import static com.ib.arb.common.Constants.Simulation.SIMULATION_MODE_KEY;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -100,7 +101,7 @@ public class KrakenOrderClient {
      * Defaults to {@code true} (safe) if the setting is absent.
      */
     public boolean isSimulation() {
-        return settings.findById("simulation_mode")
+        return settings.findById(SIMULATION_MODE_KEY)
             .map(s -> s.getValue() == 1.0)
             .orElse(true);
     }
