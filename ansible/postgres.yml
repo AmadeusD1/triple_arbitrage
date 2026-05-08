@@ -1,0 +1,69 @@
+---
+# ── PostgreSQL setup — can be run standalone or imported by playbook.yml ──────
+- name: Provision PostgreSQL
+  hosts: appservers
+  become: true
+
+  tasks:
+
+    - name: Install EPEL repository
+      dnf:
+        name: epel-release
+        state: present
+
+    - name: Add PostgreSQL 17 PGDG repository
+      dnf:
+        name: "https://download.postgresql.org/pub/repos/yum/reporpms/EL-{{ ansible_distribution_major_version }}-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+        state: present
+        disable_gpg_check: true
+
+    - name: Install PostgreSQL packages
+      dnf:
+        name:
+          - postgresql17-server
+          - postgresql17
+          - python3-psycopg2
+        state: present
+
+    - name: Initialise PostgreSQL 17 data directory
+      command: /usr/pgsql-17/bin/postgresql-17-setup initdb
+      args:
+        creates: /var/lib/pgsql/17/data/PG_VERSION
+
+    - name: Ensure PostgreSQL is started
+      systemd:
+        name: postgresql-17
+        state: started
+        enabled: true
+
+    - name: Create database user
+      become_user: postgres
+      community.postgresql.postgresql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+
+    - name: Create database
+      become_user: postgres
+      community.postgresql.postgresql_db:
+        name: "{{ db_name }}"
+        owner: "{{ db_user }}"
+
+    - name: Copy schema migration
+      copy:
+        src: "{{ playbook_dir }}/../db/migrations/init.sql"
+        dest: /tmp/arb-init.sql
+        mode: "0644"
+
+    - name: Run schema migration
+      become_user: postgres
+      shell: psql -d {{ db_name }} -f /tmp/arb-init.sql
+      changed_when: false   # init.sql uses IF NOT EXISTS / ON CONFLICT — idempotent
+
+    - name: Grant table and sequence privileges to app user
+      become_user: postgres
+      shell: |
+        psql -d {{ db_name }} -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {{ db_user }};"
+        psql -d {{ db_name }} -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {{ db_user }};"
+        psql -d {{ db_name }} -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {{ db_user }};"
+        psql -d {{ db_name }} -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {{ db_user }};"
+      changed_when: false

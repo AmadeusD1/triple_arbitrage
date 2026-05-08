@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <springProperty name="LOG_FILE" source="logging.file.name" defaultValue="/var/log/triangletrader/arb.log"/>
+
+    <!-- Console appender (dev + systemd journal) -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %5level [%15.15t] %-40.40logger{39} : %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Rolling file appender -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_FILE}</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_FILE}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>500MB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %5level [%15.15t] %-40.40logger{39} : %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Suppress noisy framework packages -->
+    <logger name="org.springframework"          level="WARN"/>
+    <logger name="org.hibernate"                level="WARN"/>
+    <logger name="com.zaxxer.hikari"            level="WARN"/>
+    <logger name="org.apache.catalina"          level="WARN"/>
+
+    <!-- Application packages -->
+    <logger name="com.ib.arb"                   level="INFO"/>
+
+    <root level="WARN">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+
+</configuration>

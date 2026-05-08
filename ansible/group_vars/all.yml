@@ -5,16 +5,16 @@ app_port: 8080
 
 # Database
 db_name: trades
-db_user: arb
-db_password: "change_me"       # use ansible-vault for production
+db_user: arbitrage
+db_password: "yyQjYDvhKRsLphXl@4567"       # use ansible-vault for production
 
 # Web app admin user (created by DataInitializer on first boot — not by init.sql)
 admin_username: admin
-admin_password: "change_me"    # use ansible-vault for production
+admin_password: "yyQjYDvhKRsLphXl@"    # use ansible-vault for production
 
 # Kraken API — leave blank to run in simulation mode
-kraken_api_key: ""
-kraken_api_secret: ""
+kraken_api_key: "CuUXlJ6bnW9iHEEiHvJiJ+1e+vkEPj7igCAbqM4UyOI4NqvCel+2aI4f"
+kraken_api_secret: " 2+xhOGxgWPDLgDyenaoOkabb79c0sTtu02FNPIpphOKZzZe209Le+NKYDPm5pfLMHy66DCnA5QeuWGXqSawzyA=="
 
 # Nginx
 http_port: 80

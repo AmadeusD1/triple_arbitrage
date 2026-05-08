@@ -63,6 +63,17 @@ CREATE TABLE IF NOT EXISTS "triangles" (
     CONSTRAINT "triangles_pkey" PRIMARY KEY ("id")
 );
 
+-- Remove duplicate triangle rows, keeping lowest id
+DELETE FROM "triangles" a USING "triangles" b
+WHERE a.id > b.id
+  AND a.exchange = b.exchange
+  AND a.pair1    = b.pair1
+  AND a.pair2    = b.pair2
+  AND a.pair3    = b.pair3;
+
+CREATE UNIQUE INDEX IF NOT EXISTS "triangles_exchange_pairs_uidx"
+    ON "triangles" ("exchange", "pair1", "pair2", "pair3");
+
 -- cycle BBS (BUY,BUY,SELL): edge = bid1×bid2 − ask3
 -- cycle BSS (BUY,SELL,SELL): edge = bid1 − ask2×ask3
 -- cycle BSB (BUY,SELL,BUY):  edge = bid1×bid3 − ask2
@@ -72,7 +83,7 @@ INSERT INTO "triangles" ("exchange","pair1","pair2","pair3","min_profit_usd","mi
     ('KRAKEN','EURUSD','EURGBP','GBPUSD', 10,0.01,'ACTIVE',0,0,'BSS'),
     ('KRAKEN','EURUSD','EURCHF','USDCHF', 10,0.01,'ACTIVE',0,0,'BSB'),
     ('KRAKEN','USDCHF','EURCHF','EURUSD', 10,0.01,'ACTIVE',0,0,'SBS')
-ON CONFLICT DO NOTHING;
+ON CONFLICT ("exchange","pair1","pair2","pair3") DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS "missed_opportunities" (
     "id"          BIGSERIAL        NOT NULL,

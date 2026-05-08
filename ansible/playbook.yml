@@ -18,7 +18,10 @@
         chdir: "{{ playbook_dir }}/../frontend"
       changed_when: true
 
-# ── Play 2: Deploy to server ──────────────────────────────────────────────────
+# ── Play 2: PostgreSQL ────────────────────────────────────────────────────────
+- import_playbook: postgres.yml
+
+# ── Play 3: Deploy application ────────────────────────────────────────────────
 - name: Deploy ARB application
   hosts: appservers
   become: true
@@ -38,19 +41,16 @@
   tasks:
 
     # ── System packages ────────────────────────────────────────────────────────
-    - name: Update apt cache
-      apt:
-        update_cache: true
-        cache_valid_time: 3600
+    - name: Install EPEL repository
+      dnf:
+        name: epel-release
+        state: present
 
     - name: Install required packages
-      apt:
+      dnf:
         name:
-          - openjdk-21-jdk-headless
+          - java-21-openjdk-headless
           - nginx
-          - postgresql
-          - postgresql-client
-          - python3-psycopg2
           - rsync
           - acl
         state: present
@@ -72,36 +72,6 @@
         group: "{{ app_user }}"
         mode: "0750"
 
-    # ── PostgreSQL ─────────────────────────────────────────────────────────────
-    - name: Ensure PostgreSQL is started
-      systemd:
-        name: postgresql
-        state: started
-        enabled: true
-
-    - name: Create database user
-      become_user: postgres
-      community.postgresql.postgresql_user:
-        name: "{{ db_user }}"
-        password: "{{ db_password }}"
-
-    - name: Create database
-      become_user: postgres
-      community.postgresql.postgresql_db:
-        name: "{{ db_name }}"
-        owner: "{{ db_user }}"
-
-    - name: Copy schema migration
-      copy:
-        src: "{{ playbook_dir }}/../db/migrations/init.sql"
-        dest: /tmp/arb-init.sql
-        mode: "0644"
-
-    - name: Run schema migration
-      become_user: postgres
-      shell: psql -d {{ db_name }} -f /tmp/arb-init.sql
-      changed_when: false   # init.sql uses IF NOT EXISTS / ON CONFLICT — idempotent
-
     # ── Backend ────────────────────────────────────────────────────────────────
     - name: Upload JAR
       copy:
@@ -111,6 +81,14 @@
         group: "{{ app_user }}"
         mode: "0640"
       notify: restart arb
+
+    - name: Create log directory
+      file:
+        path: /var/log/triangletrader
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
 
     - name: Create env config directory
       file:
@@ -162,37 +140,60 @@
       file:
         path: /var/www/arb
         state: directory
-        owner: www-data
-        group: www-data
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
         mode: "0755"
+
+    - name: Set web root writable for sync
+      file:
+        path: /var/www/arb
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        recurse: true
 
     - name: Upload frontend dist
       synchronize:
         src: "{{ playbook_dir }}/../frontend/dist/"
         dest: /var/www/arb/
         delete: true
-        rsync_opts:
-          - "--chown=www-data:www-data"
+      become: false
 
-    - name: Remove default nginx site
+    - name: Set frontend file ownership
       file:
-        path: /etc/nginx/sites-enabled/default
-        state: absent
-      notify: reload nginx
+        path: /var/www/arb
+        owner: nginx
+        group: nginx
+        recurse: true
 
     - name: Install nginx site config
       template:
         src: templates/nginx-arb.conf.j2
-        dest: /etc/nginx/sites-available/arb
+        dest: /etc/nginx/conf.d/arb.conf
         mode: "0644"
       notify: reload nginx
 
-    - name: Enable nginx site
-      file:
-        src: /etc/nginx/sites-available/arb
-        dest: /etc/nginx/sites-enabled/arb
-        state: link
-      notify: reload nginx
+    - name: Set SELinux file context for web root
+      community.general.sefcontext:
+        target: '/var/www/arb(/.*)?'
+        setype: httpd_sys_content_t
+        state: present
+
+    - name: Apply SELinux context to web files
+      command: restorecon -Rv /var/www/arb
+      changed_when: false
+
+    - name: Allow nginx to proxy to backend
+      ansible.posix.seboolean:
+        name: httpd_can_network_connect
+        state: true
+        persistent: true
+
+    - name: Open HTTP port in firewalld
+      ansible.posix.firewalld:
+        service: http
+        permanent: true
+        state: enabled
+        immediate: true
 
     - name: Ensure nginx is started
       systemd:
