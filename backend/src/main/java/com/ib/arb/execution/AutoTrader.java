@@ -9,6 +9,8 @@ import com.ib.arb.model.Trade;
 import com.ib.arb.model.TradeLeg;
 import com.ib.arb.model.TriangleConfig;
 import com.ib.arb.position.PositionService;
+import com.ib.arb.model.MissedOpportunity;
+import com.ib.arb.repository.MissedOpportunityRepository;
 import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.risk.RiskService;
@@ -18,6 +20,9 @@ import static com.ib.arb.common.Constants.LegStatus.SIMULATED;
 import static com.ib.arb.common.Constants.TradeStatus.CANCELLED;
 import static com.ib.arb.common.Constants.TradeStatus.FILLED;
 import static com.ib.arb.common.Constants.TradeStatus.SIMULATION;
+import static com.ib.arb.common.Constants.RejectionStatus.REJECTED_BALANCE;
+import static com.ib.arb.common.Constants.RejectionStatus.REJECTED_RISK;
+import static com.ib.arb.common.Constants.RejectionStatus.REJECTED_PROFIT;
 import com.ib.arb.scanner.ArbitrageEngine;
 import com.ib.arb.scanner.Cycle;
 import com.ib.arb.scanner.Signal;
@@ -27,7 +32,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /**
  * Orchestrates arbitrage cycles (automated and manual): scan → validate → execute → record → broadcast.
@@ -53,6 +60,7 @@ public class AutoTrader {
     private final AlertService alerts;
     private final TriangleConfigRepository triangleConfigRepo;
     private final CurrencyRateFeed currencyRateFeed;
+    private final MissedOpportunityRepository missedOpportunityRepo;
 
     private volatile long detected = 0;
     private volatile long executed = 0;
@@ -73,7 +81,8 @@ public class AutoTrader {
     public AutoTrader(ArbitrageEngine arbitrageEngine, PositionService positions,
                       RiskService risk, KrakenOrderClient broker,
                       TradeRepository tradeRepo, AlertService alerts,
-                      TriangleConfigRepository triangleConfigRepo, CurrencyRateFeed currencyRateFeed) {
+                      TriangleConfigRepository triangleConfigRepo, CurrencyRateFeed currencyRateFeed,
+                      MissedOpportunityRepository missedOpportunityRepo) {
         this.arbitrageEngine = arbitrageEngine;
         this.positions = positions;
         this.risk = risk;
@@ -82,6 +91,7 @@ public class AutoTrader {
         this.alerts = alerts;
         this.triangleConfigRepo = triangleConfigRepo;
         this.currencyRateFeed = currencyRateFeed;
+        this.missedOpportunityRepo = missedOpportunityRepo;
     }
 
     // -------------------------------------------------------------------------
@@ -129,11 +139,23 @@ public class AutoTrader {
         var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), effectiveOrderSize, s.profit());
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
-                case "REJECTED_BALANCE" -> log.warn("[ARB] Missed — insufficient balance for triangle={} cycle={}",
+                case REJECTED_BALANCE -> log.warn("[ARB] Missed — insufficient balance for triangle={} cycle={}",
                     s.config().getId(), s.cycle());
-                case "REJECTED_RISK"    -> log.warn("[ARB] Missed — risk check failed: {}", v.reason());
-                case "REJECTED_PROFIT"  -> log.warn("[ARB] Missed — profit threshold not met: {}", v.reason());
+                case REJECTED_RISK    -> log.warn("[ARB] Missed — risk check failed: {}", v.reason());
+                case REJECTED_PROFIT  -> log.warn("[ARB] Missed — profit threshold not met: {}", v.reason());
             }
+            missedOpportunityRepo.save(new MissedOpportunity()
+                .setTime(LocalDateTime.now())
+                .setTriangleId(s.config().getId())
+                .setExchange(s.exchange().name())
+                .setPair1(s.config().getPair1())
+                .setPair2(s.config().getPair2())
+                .setPair3(s.config().getPair3())
+                .setCycle(s.cycle().name())
+                .setEdge(s.profit())
+                .setOrderSize(effectiveOrderSize)
+                .setRejection(v.rejectionStatus())
+                .setReason(v.reason()));
             missed++;
             return;
         }
@@ -169,31 +191,26 @@ public class AutoTrader {
         var dirs  = s.cycle().dirs;
 
         // Pass 1: min available balance in USD across all three spent currencies
-        var minBalanceUsd = Double.MAX_VALUE;
-        for (int i = 0; i < 3; i++) {
-            var isBuy    = BUY.equals(dirs[i]);
-            var spentCcy = isBuy ? pairs[i].substring(3) : pairs[i].substring(0, 3);
-            var avail    = positions.getAvailableAmount(s.exchange(), spentCcy);
-            minBalanceUsd = Math.min(minBalanceUsd, avail * getUSDValue(spentCcy));
-        }
+        var minBalanceUsd = IntStream.range(0, pairs.length)
+            .mapToDouble(i -> {
+                var spentCcy = BUY.equals(dirs[i]) ? pairs[i].substring(3) : pairs[i].substring(0, 3);
+                return positions.getAvailableAmount(s.exchange(), spentCcy) * currencyRateFeed.getRate(spentCcy);
+            })
+            .min()
+            .orElse(0.0);
         var effectiveOrderSize = Math.min(minBalanceUsd * 0.95, orderSizeUsd);
         log.debug("[ARB] OrderSize pass1 — minBalanceUsd={} → capped={}",
             String.format("%.2f", minBalanceUsd), String.format("%.2f", effectiveOrderSize));
 
         // Pass 2: normalize to the minimum USD amount across all three pair quote currencies
-        var minLegUsd = effectiveOrderSize;
-        for (var pair : pairs) {
-            var quoteCcy = pair.substring(3);
-            minLegUsd = Math.min(minLegUsd, effectiveOrderSize * getUSDValue(quoteCcy));
-        }
+        var minLegUsd = Arrays.stream(pairs)
+            .mapToDouble(pair -> effectiveOrderSize * currencyRateFeed.getRate(pair.substring(3)))
+            .min()
+            .orElse(effectiveOrderSize);
         log.debug("[ARB] OrderSize pass2 — minLegUsd={} (final effectiveOrderSize={})",
             String.format("%.2f", minLegUsd), String.format("%.2f", minLegUsd));
 
         return minLegUsd;
-    }
-
-    private double getUSDValue(String currency) {
-        return currencyRateFeed.getRate(currency);
     }
 
     // -------------------------------------------------------------------------
@@ -215,23 +232,26 @@ public class AutoTrader {
         }
 
         var exchange = Exchange.valueOf(config.getExchange().toUpperCase());
+        var cycleEnum = Cycle.valueOf(cycle);
         // Derive notional size from leg 1 (price × volume) for balance and risk checks
         var notional = legs.get(0).price() * legs.get(0).volume();
-        var edge = switch (cycle) {
-            case "BBS" -> legs.get(0).price() * legs.get(1).price() - legs.get(2).price();
-            case "BSS" -> legs.get(0).price() - legs.get(1).price() * legs.get(2).price();
-            case "BSB" -> legs.get(0).price() * legs.get(2).price() - legs.get(1).price();
-            case "SBS" -> legs.get(1).price() - legs.get(0).price() * legs.get(2).price();
-            default    -> 0.0;
+        var edge = switch (cycleEnum) {
+            case BBS -> legs.get(0).price() * legs.get(1).price() - legs.get(2).price();
+            case BSS -> legs.get(0).price() - legs.get(1).price() * legs.get(2).price();
+            case BSB -> legs.get(0).price() * legs.get(2).price() - legs.get(1).price();
+            case SBS -> legs.get(1).price() - legs.get(0).price() * legs.get(2).price();
         };
+
+        log.info("[MANUAL] Computed edge — cycle={} notional={} edge={}",
+            cycleEnum, String.format("%.2f", notional), String.format("%.5f", edge));
 
         var v = validatePreExecution(exchange, config, cycle, notional, edge);
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
-                case "REJECTED_BALANCE" -> log.warn("[MANUAL] Rejected — insufficient balance for triangle={} cycle={}",
+                case REJECTED_BALANCE -> log.warn("[MANUAL] Rejected — insufficient balance for triangle={} cycle={}",
                     config.getId(), cycle);
-                case "REJECTED_RISK"    -> log.warn("[MANUAL] Rejected — risk check failed: {}", v.reason());
-                case "REJECTED_PROFIT"  -> log.warn("[MANUAL] Rejected — profit threshold not met: {}", v.reason());
+                case REJECTED_RISK    -> log.warn("[MANUAL] Rejected — risk check failed: {}", v.reason());
+                case REJECTED_PROFIT  -> log.warn("[MANUAL] Rejected — profit threshold not met: {}", v.reason());
             }
             return new ManualTradeResult(-1, v.rejectionStatus(), 0.0);
         }
@@ -254,7 +274,7 @@ public class AutoTrader {
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
         var estimatedPnl = filled ? edge * notional : 0.0;
-        var signal = new Signal(exchange, config, Cycle.valueOf(cycle), edge);
+        var signal = new Signal(exchange, config, cycleEnum, edge);
 
         var trade = finalizeExecution(signal, legResults, latencyMs, estimatedPnl, filled, "MANUAL", false);
         return new ManualTradeResult(trade.getId(), trade.getStatus(), estimatedPnl);
@@ -275,16 +295,16 @@ public class AutoTrader {
     private ValidationResult validatePreExecution(Exchange exchange, TriangleConfig config,
                                                    String cycle, double notional, double edge) {
         if (!hasBalanceForAllLegs(exchange, config, cycle, notional))
-            return ValidationResult.reject("REJECTED_BALANCE", null);
+            return ValidationResult.reject(REJECTED_BALANCE, null);
 
         var riskResult = risk.check(notional);
         if (!riskResult.allowed())
-            return ValidationResult.reject("REJECTED_RISK", riskResult.reason());
+            return ValidationResult.reject(REJECTED_RISK, riskResult.reason());
 
         var profitResult = risk.checkProfit(
             config.getMinProfitPercent(), config.getMinProfitUsd(), edge, edge * notional);
         if (!profitResult.allowed())
-            return ValidationResult.reject("REJECTED_PROFIT", profitResult.reason());
+            return ValidationResult.reject(REJECTED_PROFIT, profitResult.reason());
 
         return ValidationResult.ok();
     }

@@ -2,6 +2,8 @@ package com.ib.arb.position;
 
 import com.ib.arb.marketdata.Exchange;
 import com.ib.arb.repository.TriangleConfigRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,7 @@ import java.util.stream.Collectors;
 @Service
 public class PositionService {
 
+    private static final Logger log = LoggerFactory.getLogger(PositionService.class);
 
     @Value("${kraken.position-cache-ttl-ms:2000}")
     private long cacheTtlMs;
@@ -38,13 +41,25 @@ public class PositionService {
     public boolean hasAvailableBalance(Exchange exchange, String isoCurrency, double requiredAmount) {
         if (isStale(exchange)) refreshBalances(exchange);
         var balances = balanceCache.getOrDefault(exchange, Map.of());
-        return balances.getOrDefault(toAssetKey(exchange, isoCurrency), 0.0) >= requiredAmount;
+        var available = balances.getOrDefault(toAssetKey(exchange, isoCurrency), 0.0);
+        var result = available >= requiredAmount;
+        log.debug("[Position] Balance check {} on {}: available={} required={} ok={}", isoCurrency, exchange, available, requiredAmount, result);
+        return result;
     }
 
     public double getAvailableAmount(Exchange exchange, String isoCurrency) {
         if (isStale(exchange)) refreshBalances(exchange);
         var balances = balanceCache.getOrDefault(exchange, Map.of());
-        return balances.getOrDefault(toAssetKey(exchange, isoCurrency), 0.0);
+        var key = toAssetKey(exchange, isoCurrency);
+        if (!balances.containsKey(key)) {
+            log.warn("[Position] Balance not found for {} on {} (key={})", isoCurrency, exchange, key);
+            return 0.0;
+        }
+        var amount = balances.get(key);
+        if (amount == 0.0) {
+            log.warn("[Position] Zero balance for {} on {}", isoCurrency, exchange);
+        }
+        return amount;
     }
 
     @Scheduled(fixedDelayString = "${kraken.position-cache-ttl-ms:2000}")
@@ -53,6 +68,7 @@ public class PositionService {
     }
 
     public void refreshBalances(Exchange exchange) {
+        log.debug("[Position] Refreshing balances for {}", exchange);
         clients.stream()
             .filter(c -> c.getExchange() == exchange)
             .findFirst()
@@ -61,6 +77,9 @@ public class PositionService {
                 if (!fetched.isEmpty()) {
                     balanceCache.put(exchange, fetched);
                     lastRefreshed.put(exchange, System.currentTimeMillis());
+                    log.info("[Position] Balances refreshed for {} ({} entries)", exchange, fetched.size());
+                } else {
+                    log.warn("[Position] Empty balance response from {}", exchange);
                 }
             });
     }
@@ -89,9 +108,11 @@ public class PositionService {
 
     /** Returns open orders for all registered exchanges. */
     public List<PositionClient.OpenOrder> fetchOpenOrders() {
-        return clients.stream()
+        var orders = clients.stream()
             .flatMap(c -> c.fetchOpenOrders().stream())
             .toList();
+        log.info("[Position] Fetched {} open order(s) across {} exchange(s)", orders.size(), clients.size());
+        return orders;
     }
 
     public record BalanceEntry(String exchange, String currency, String krakenKey, double amount) {}

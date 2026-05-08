@@ -42,6 +42,21 @@ export interface PriceSnapshot {
   ask: number;
 }
 
+export interface MissedOpportunity {
+  id: number;
+  time: string;
+  triangleId: number;
+  exchange: string;
+  pair1: string;
+  pair2: string;
+  pair3: string;
+  cycle: CycleDirection;
+  edge: number;
+  orderSize: number;
+  rejection: string;
+  reason: string | null;
+}
+
 export interface DashboardSnapshot {
   dailyProfitAndLoss: number;
   brokerConnected: boolean;
@@ -50,6 +65,7 @@ export interface DashboardSnapshot {
   prices: PriceSnapshot[];
   tradeInProgress: boolean;
   fxRates: Record<string, number>;
+  recentMissedOpportunities: MissedOpportunity[];
 }
 
 export interface EquityPoint {

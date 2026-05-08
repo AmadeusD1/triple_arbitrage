@@ -73,3 +73,20 @@ INSERT INTO "triangles" ("exchange","pair1","pair2","pair3","min_profit_usd","mi
     ('KRAKEN','EURUSD','EURCHF','USDCHF', 10,0.01,'ACTIVE',0,0,'BSB'),
     ('KRAKEN','USDCHF','EURCHF','EURUSD', 10,0.01,'ACTIVE',0,0,'SBS')
 ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS "missed_opportunities" (
+    "id"          BIGSERIAL        NOT NULL,
+    "time"        TIMESTAMP(3)     NOT NULL,
+    "triangle_id" BIGINT           NOT NULL,
+    "exchange"    TEXT             NOT NULL,
+    "pair1"       TEXT             NOT NULL,
+    "pair2"       TEXT             NOT NULL,
+    "pair3"       TEXT             NOT NULL,
+    "cycle"       TEXT             NOT NULL,
+    "edge"        DOUBLE PRECISION NOT NULL,
+    "order_size"  DOUBLE PRECISION NOT NULL,
+    "rejection"   TEXT             NOT NULL,
+    "reason"      TEXT,
+
+    CONSTRAINT "missed_opportunities_pkey" PRIMARY KEY ("id")
+);

@@ -5,6 +5,7 @@ import com.ib.arb.analytics.AnalyticsService;
 import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.execution.AutoTrader;
 import com.ib.arb.marketdata.CurrencyRateFeed;
+import com.ib.arb.repository.MissedOpportunityRepository;
 import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.scanner.ArbitrageEngine;
 import org.springframework.stereotype.Component;
@@ -20,7 +21,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 public class DashboardWebSocketHandler extends TextWebSocketHandler {
 
     private final Set<WebSocketSession> sessions = new CopyOnWriteArraySet<>();
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
     private volatile String lastPayload = null;
 
     private final AnalyticsService analytics;
@@ -29,19 +30,24 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
     private final ArbitrageEngine arbitrageEngine;
     private final CurrencyRateFeed currencyRateFeed;
     private final AutoTrader autoTrader;
+    private final MissedOpportunityRepository missedOpportunityRepo;
 
     public DashboardWebSocketHandler(AnalyticsService analytics,
                                      KrakenOrderClient broker,
                                      TradeRepository tradeRepo,
                                      ArbitrageEngine arbitrageEngine,
                                      CurrencyRateFeed currencyRateFeed,
-                                     AutoTrader autoTrader) {
+                                     AutoTrader autoTrader,
+                                     MissedOpportunityRepository missedOpportunityRepo,
+                                     ObjectMapper mapper) {
         this.analytics = analytics;
         this.broker = broker;
         this.tradeRepo = tradeRepo;
         this.arbitrageEngine = arbitrageEngine;
         this.currencyRateFeed = currencyRateFeed;
         this.autoTrader = autoTrader;
+        this.missedOpportunityRepo = missedOpportunityRepo;
+        this.mapper = mapper;
     }
 
     @Override
@@ -66,7 +72,8 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
             tradeRepo.findTop20ByOrderByTimeDesc(),
             arbitrageEngine.currentSnapshots(),
             autoTrader.isExecuting(),
-            currencyRateFeed.getAllRates()
+            currencyRateFeed.getAllRates(),
+            missedOpportunityRepo.findTop1000ByOrderByTimeDesc()
         ));
     }
 

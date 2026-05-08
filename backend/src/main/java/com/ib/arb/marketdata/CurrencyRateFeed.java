@@ -50,10 +50,15 @@ public class CurrencyRateFeed {
     }
 
     /** Returns the USD value of 1 unit of {@code isoCurrency}. Returns {@code 1.0} for USD,
-     *  {@code 0.0} if the rate is not yet available. */
+     *  {@code 0.0} if the rate is not yet available. Tries {@code CCY/USD} first; falls back
+     *  to {@code 1 / USD/CCY} if only the inverse pair is published. */
     public double getRate(String isoCurrency) {
         if ("USD".equals(isoCurrency)) return 1.0;
-        return rates.getOrDefault(isoCurrency + "/USD", 0.0);
+        var direct = rates.get(isoCurrency + "/USD");
+        if (direct != null) return direct;
+        var inverse = rates.get("USD/" + isoCurrency);
+        if (inverse != null && inverse != 0.0) return 1.0 / inverse;
+        return 0.0;
     }
 
     public Map<String, Double> getAllRates() {

@@ -13,9 +13,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -167,20 +169,23 @@ public class KrakenOrderClient {
      * them from the live order book. Used for manual trade execution.
      */
     public List<LegResult> placeOrderLegs(List<OrderLeg> legs) {
-        var results = new ArrayList<LegResult>();
         openOrders.incrementAndGet();
         try {
-            for (var l : legs) {
-                var krakenPair = KrakenOrderBookFeed.toKrakenSymbol(l.pair());
-                var txid = sendOrder(krakenPair, l.direction().toLowerCase(), l.price(), l.volume());
-                results.add(new LegResult(l.legIndex(), l.pair(), l.direction(),
-                    l.price(), l.volume(), txid.isPresent(), txid.orElse(null)));
-                if (txid.isEmpty()) break;
-            }
+            var futures = legs.stream()
+                .map(l -> CompletableFuture.supplyAsync(() -> {
+                    var krakenPair = KrakenOrderBookFeed.toKrakenSymbol(l.pair());
+                    var txid = sendOrder(krakenPair, l.direction().toLowerCase(), l.price(), l.volume());
+                    return new LegResult(l.legIndex(), l.pair(), l.direction(),
+                        l.price(), l.volume(), txid.isPresent(), txid.orElse(null));
+                }))
+                .toList();
+            return futures.stream()
+                .map(CompletableFuture::join)
+                .sorted(Comparator.comparingInt(LegResult::legIndex))
+                .toList();
         } finally {
             openOrders.decrementAndGet();
         }
-        return results;
     }
 
     /**

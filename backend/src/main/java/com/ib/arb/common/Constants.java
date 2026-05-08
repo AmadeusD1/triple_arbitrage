@@ -27,5 +27,12 @@ public final class Constants {
         private TriangleStatus() {}
     }
 
+    public static final class RejectionStatus {
+        public static final String REJECTED_BALANCE = "REJECTED_BALANCE";
+        public static final String REJECTED_RISK    = "REJECTED_RISK";
+        public static final String REJECTED_PROFIT  = "REJECTED_PROFIT";
+        private RejectionStatus() {}
+    }
+
     private Constants() {}
 }

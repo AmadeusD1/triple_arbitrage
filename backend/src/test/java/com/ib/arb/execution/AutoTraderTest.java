@@ -9,6 +9,7 @@ import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TriangleConfig;
 import com.ib.arb.position.PositionService;
+import com.ib.arb.repository.MissedOpportunityRepository;
 import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.risk.RiskService;
@@ -31,14 +32,15 @@ import static org.mockito.Mockito.*;
 
 class AutoTraderTest {
 
-    ArbitrageEngine arbitrageEngine          = mock(ArbitrageEngine.class);
-    PositionService positions                = mock(PositionService.class);
-    RiskService risk                         = mock(RiskService.class);
-    KrakenOrderClient broker                 = mock(KrakenOrderClient.class);
-    TradeRepository tradeRepo                = mock(TradeRepository.class);
-    AlertService alerts                      = mock(AlertService.class);
-    TriangleConfigRepository triangleRepo    = mock(TriangleConfigRepository.class);
-    CurrencyRateFeed currencyRateFeed                   = mock(CurrencyRateFeed.class);
+    ArbitrageEngine arbitrageEngine                      = mock(ArbitrageEngine.class);
+    PositionService positions                            = mock(PositionService.class);
+    RiskService risk                                     = mock(RiskService.class);
+    KrakenOrderClient broker                             = mock(KrakenOrderClient.class);
+    TradeRepository tradeRepo                            = mock(TradeRepository.class);
+    AlertService alerts                                  = mock(AlertService.class);
+    TriangleConfigRepository triangleRepo                = mock(TriangleConfigRepository.class);
+    CurrencyRateFeed currencyRateFeed                    = mock(CurrencyRateFeed.class);
+    MissedOpportunityRepository missedOpportunityRepo    = mock(MissedOpportunityRepository.class);
 
     AutoTrader autoTrader;
 
@@ -67,7 +69,8 @@ class AutoTraderTest {
     @BeforeEach
     void setup() {
         autoTrader = new AutoTrader(arbitrageEngine, positions, risk, broker,
-                                    tradeRepo, alerts, triangleRepo, currencyRateFeed);
+                                    tradeRepo, alerts, triangleRepo, currencyRateFeed,
+                                    missedOpportunityRepo);
         when(currencyRateFeed.getAllRates()).thenReturn(Map.of());
         when(currencyRateFeed.getRate(anyString())).thenReturn(1.0);
         ReflectionTestUtils.setField(autoTrader, "orderSizeUsd", 100_000.0);
