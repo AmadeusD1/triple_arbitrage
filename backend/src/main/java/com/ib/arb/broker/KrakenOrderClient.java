@@ -72,9 +72,6 @@ public class KrakenOrderClient {
     public record LegResult(int legIndex, String pair, String direction,
                             double price, double volume, boolean filled, String orderId) {}
 
-    /** Caller-supplied leg specification used by manual trade execution. */
-    public record OrderLeg(int legIndex, String pair, String direction, double price, double volume) {}
-
     /** Internal metadata computed from the order book before any orders are placed. */
     private record LegMeta(int legIndex, String pair, String direction, double price, double volume) {}
 

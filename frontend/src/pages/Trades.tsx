@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
-  Box, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
+  Box, Button, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
   IconButton, Paper, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { getTrade } from '../api/rest';
+import { getTrade, deleteSimulationTrades } from '../api/rest';
 import type { Trade, TradeDetail, LegStatus } from '../types';
 
 interface Props { trades: Trade[] }
@@ -80,14 +80,23 @@ function TradeDetailDialog({ tradeId, onClose }: { tradeId: number | null; onClo
 
 export default function Trades({ trades }: Props) {
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteSimulations = async () => {
+    setDeleting(true);
+    try { await deleteSimulationTrades(); } finally { setDeleting(false); }
+  };
 
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
-      <Typography variant="h5" sx={{ mb: 2 }}>Trades</Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5">Trades</Typography>
+        <Button variant="outlined" color="error" size="small"
+          onClick={handleDeleteSimulations} disabled={deleting}>
+          {deleting ? 'Deleting…' : 'Delete Simulations'}
+        </Button>
+      </Box>
       <Paper>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ px: 2, pt: 2, pb: 1 }}>
-          Click a row for leg details
-        </Typography>
         <TableContainer>
           <Table size="small">
             <TableHead>
@@ -104,7 +113,7 @@ export default function Trades({ trades }: Props) {
               {trades.map((t) => (
                 <TableRow key={t.id} hover sx={{ cursor: 'pointer' }}
                   onClick={() => setSelectedTradeId(t.id)}>
-                  <TableCell>{t.time.substring(0, 19).replace('T', ' ')}</TableCell>
+                  <TableCell>{new Date(t.time + 'Z').toLocaleString()}</TableCell>
                   <TableCell>{t.direction}</TableCell>
                   <TableCell align="right">{t.spread.toFixed(5)}</TableCell>
                   <TableCell align="right" sx={{ color: t.pnl >= 0 ? 'success.main' : 'error.main' }}>

@@ -1,9 +1,11 @@
-package com.ib.arb.scanner;
+package com.ib.arb.engine;
 
 import com.ib.arb.marketdata.OrderBookFeed;
 import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.TriangleConfig;
 import com.ib.arb.repository.TriangleConfigRepository;
+import com.ib.arb.scanner.Cycle;
+import com.ib.arb.scanner.Signal;
 import static com.ib.arb.common.Constants.TriangleStatus.ACTIVE;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -148,14 +150,14 @@ public class ArbitrageEngine {
         var edge = switch (cycle) {
             case BBS -> b1.bid() * b2.bid() - b3.ask();
             case BSS -> b1.bid() - b2.ask() * b3.ask();
-            case BSB -> b1.bid() * b3.bid() - b2.ask();
-            case SBS -> b2.bid() - b1.ask() * b3.ask();
+            case BSB -> 1.0/b1.bid() * b2.ask() - b3.bid();
+            case SBS -> 1.0/b1.ask() * b2.bid() - b3.ask();
         };
 
-        if (edge > threshold) {
+        if (edge > 0 && edge > threshold) {
             log.debug("[SCAN] Triangle={} cycle={} edge={} — PROFITABLE (threshold={})",
                 config.getId(), cycle, String.format("%.5f", edge), threshold);
-            return Optional.of(new Signal(feed.getExchange(), config, cycle, edge));
+            return Optional.of(new Signal(feed.getExchange(), config, cycle, edge, b1, b2, b3));
         }
 
         log.debug("[SCAN] Triangle={} cycle={} edge={} — below threshold {}",

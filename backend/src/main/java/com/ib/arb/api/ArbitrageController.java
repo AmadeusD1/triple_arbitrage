@@ -1,7 +1,7 @@
 package com.ib.arb.api;
 
-import com.ib.arb.broker.KrakenOrderClient;
-import com.ib.arb.execution.AutoTrader;
+import com.ib.arb.broker.OrderLeg;
+import com.ib.arb.engine.AutoTrader;
 import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.scheduler.ArbitrageScheduler;
 import org.slf4j.Logger;
@@ -63,5 +63,5 @@ public class ArbitrageController {
     }
 
     public record StatusResponse(boolean running, AutoTrader.ArbitrageStats stats) {}
-    public record ManualTradeRequest(Long triangleId, String cycle, List<KrakenOrderClient.OrderLeg> legs) {}
+    public record ManualTradeRequest(Long triangleId, String cycle, List<OrderLeg> legs) {}
 }

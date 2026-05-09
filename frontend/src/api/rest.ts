@@ -42,6 +42,7 @@ export const getEquity             = (): Promise<AxiosResponse<EquityPoint[]>>  
 export const getExecution          = (): Promise<AxiosResponse<ExecutionStats>>     => client.get('/stats/execution');
 export const getTrades             = (): Promise<AxiosResponse<Trade[]>>            => client.get('/trades');
 export const getTrade              = (id: number): Promise<AxiosResponse<TradeDetail>> => client.get(`/trades/${id}`);
+export const deleteSimulationTrades = (): Promise<AxiosResponse<void>>                => client.delete('/trades/simulation');
 export const getSettings           = (): Promise<AxiosResponse<Setting[]>>          => client.get('/settings');
 export const putSettings           = (data: Record<string, number>): Promise<AxiosResponse<void>> => client.put('/settings', data);
 export const getBrokerHealth       = (): Promise<AxiosResponse<BrokerHealth>>       => client.get('/broker/health');

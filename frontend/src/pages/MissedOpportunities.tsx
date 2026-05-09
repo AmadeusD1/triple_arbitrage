@@ -55,7 +55,7 @@ export default function MissedOpportunities({ rows }: Props) {
               {slice.map((r) => (
                 <TableRow key={r.id} hover>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                    {new Date(r.time).toLocaleString()}
+                    {new Date(r.time + 'Z').toLocaleString()}
                   </TableCell>
                   <TableCell>{r.exchange}</TableCell>
                   <TableCell>

@@ -1,7 +1,7 @@
 package com.ib.arb.api;
 
 import com.ib.arb.analytics.AnalyticsService;
-import com.ib.arb.execution.AutoTrader;
+import com.ib.arb.engine.AutoTrader;
 import com.ib.arb.repository.TradeRepository;
 import static com.ib.arb.common.Constants.TradeStatus.FILLED;
 import org.springframework.http.ResponseEntity;

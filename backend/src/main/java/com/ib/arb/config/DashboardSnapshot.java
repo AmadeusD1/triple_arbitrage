@@ -1,6 +1,6 @@
 package com.ib.arb.config;
 
-import com.ib.arb.execution.AutoTrader;
+import com.ib.arb.engine.AutoTrader;
 import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.MissedOpportunity;
 import com.ib.arb.model.Trade;

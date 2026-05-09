@@ -1,10 +1,12 @@
-package com.ib.arb.execution;
+package com.ib.arb.engine;
 
 import com.ib.arb.alert.AlertService;
 import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.broker.KrakenOrderClient.LegResult;
+import com.ib.arb.broker.OrderLeg;
 import com.ib.arb.marketdata.Exchange;
 import com.ib.arb.marketdata.CurrencyRateFeed;
+import com.ib.arb.marketdata.OrderBook;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TradeLeg;
 import com.ib.arb.model.TriangleConfig;
@@ -23,17 +25,18 @@ import static com.ib.arb.common.Constants.TradeStatus.SIMULATION;
 import static com.ib.arb.common.Constants.RejectionStatus.REJECTED_BALANCE;
 import static com.ib.arb.common.Constants.RejectionStatus.REJECTED_RISK;
 import static com.ib.arb.common.Constants.RejectionStatus.REJECTED_PROFIT;
-import com.ib.arb.scanner.ArbitrageEngine;
+import com.ib.arb.engine.ArbitrageEngine;
 import com.ib.arb.scanner.Cycle;
 import com.ib.arb.scanner.Signal;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.Arrays;
 import java.util.List;
+import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 
 /**
@@ -133,10 +136,27 @@ public class AutoTrader {
         log.info("[ARB] Signal detected — triangle={} exchange={} cycle={} profit={}",
             s.config().getId(), s.exchange(), s.cycle(), String.format("%.5f", s.profit()));
 
-        var effectiveOrderSize = computeEffectiveOrderSize(s);
-        log.info("[ARB] Effective order size — {}", String.format("%.2f", effectiveOrderSize));
+        var liquidityCap = computeMinimumVolume(s);
+        log.info("[ARB] Liquidity cap — {}", String.format("%.2f", liquidityCap));
+        var pairs = new String[]{ s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
+        var dirs  = s.cycle().dirs;
 
-        var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), effectiveOrderSize, s.profit());
+        // Pass 1: min available balance in USD across all three spent currencies
+        var minBalanceUsd = IntStream.range(0, pairs.length)
+            .mapToDouble(i -> {
+                var spentCcy = BUY.equals(dirs[i]) ? pairs[i].substring(3) : pairs[i].substring(0, 3);
+                return positions.getAvailableAmount(s.exchange(), spentCcy) * currencyRateFeed.getRate(spentCcy);
+            })
+            .min()
+            .orElse(0.0);
+        var balanceCap = Math.min(minBalanceUsd * 0.95, orderSizeUsd);
+        log.debug("[ARB] Balance cap — minBalanceUsd={} → capped={}",
+            String.format("%.2f", minBalanceUsd), String.format("%.2f", balanceCap));
+
+        var orderSize = Math.min(liquidityCap, balanceCap);
+
+        //TODO: change checks
+        var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), orderSize, s.profit());
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
                 case REJECTED_BALANCE -> log.warn("[ARB] Missed — insufficient balance for triangle={} cycle={}",
@@ -153,7 +173,7 @@ public class AutoTrader {
                 .setPair3(s.config().getPair3())
                 .setCycle(s.cycle().name())
                 .setEdge(s.profit())
-                .setOrderSize(effectiveOrderSize)
+                .setOrderSize(orderSize)
                 .setRejection(v.rejectionStatus())
                 .setReason(v.reason()));
             missed++;
@@ -164,53 +184,87 @@ public class AutoTrader {
             executing = true;
         }
 
+        List<OrderLeg> legs = switch (s.cycle()) {
+            case BBS -> List.of(
+                new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
+                    orderSize / (s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)))),
+                new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(),
+                    orderSize / (s.b2().ask() * currencyRateFeed.getRate(pairs[1].substring(3)))),
+                new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
+                    orderSize / (s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)))));
+            case BSS -> List.of(
+                new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
+                    orderSize / (s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)))),
+                new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(),
+                    orderSize / (s.b2().bid() * currencyRateFeed.getRate(pairs[1].substring(3)))),
+                new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
+                    orderSize / (s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)))));
+            case BSB -> List.of(
+                new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
+                    orderSize / (s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)))),
+                new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(),
+                    orderSize / (s.b2().bid() * currencyRateFeed.getRate(pairs[1].substring(3)))),
+                new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(),
+                    orderSize / (s.b3().ask() * currencyRateFeed.getRate(pairs[2].substring(3)))));
+            case SBS -> List.of(
+                new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(),
+                    orderSize / (s.b1().bid() * currencyRateFeed.getRate(pairs[0].substring(3)))),
+                new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(),
+                    orderSize / (s.b2().ask() * currencyRateFeed.getRate(pairs[1].substring(3)))),
+                new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
+                    orderSize / (s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)))));
+        };
+
         log.info("[ARB] Placing orders — triangle={} cycle={} orderSize={}",
-            s.config().getId(), s.cycle(), effectiveOrderSize);
+            s.config().getId(), s.cycle(), orderSize);
         var start = System.currentTimeMillis();
         List<LegResult> legResults;
         if (broker.isSimulation()) {
-            legResults = broker.computeLegs(s, effectiveOrderSize);
+            legResults = legs.stream()
+                .map(l -> new LegResult(l.legIndex(), l.pair(), l.direction(),
+                    l.price(), l.volume(), true, null))
+                .toList();
             log.info("[SIM] Cycle {} | {} | profit={}", s.cycle(),
                 legResults.stream()
                     .map(l -> l.direction() + " " + l.pair())
                     .reduce((a, b) -> a + ", " + b).orElse(""),
                 String.format("%.5f", s.profit()));
         } else {
-            legResults = broker.placeOrder(s, effectiveOrderSize);
+            legResults = broker.placeOrderLegs(legs);
         }
         var latencyMs = System.currentTimeMillis() - start;
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
-        var estimatedPnl = filled ? s.profit() * effectiveOrderSize : 0.0;
+        var estimatedPnl = filled ? s.profit() * orderSize : 0.0;
 
         finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true);
     }
 
-    private double computeEffectiveOrderSize(Signal s) {
+    private double computeMinimumVolume(Signal s) {
         var pairs = new String[]{ s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
-        var dirs  = s.cycle().dirs;
+        // compute the minimum volume in USD across all three legs, based on price levels and currency rates
+        double minVolume = switch (s.cycle()) {
+            case BBS -> min3(
+                    s.b1().askQty() * s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)),
+                    s.b2().askQty() * s.b2().ask() * currencyRateFeed.getRate(pairs[1].substring(3)),
+                    s.b3().bidQty() * s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)));
+            case BSS -> min3(
+                    s.b1().askQty() * s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)),
+                    s.b2().bidQty() * s.b2().bid() * currencyRateFeed.getRate(pairs[1].substring(3)),
+                    s.b3().bidQty() * s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)));
+            case BSB -> min3(
+                    s.b1().askQty() * s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)),
+                    s.b2().bidQty() * s.b2().bid() * currencyRateFeed.getRate(pairs[1].substring(3)),
+                    s.b3().askQty() * s.b3().ask() * currencyRateFeed.getRate(pairs[2].substring(3)));
+            case SBS -> min3(
+                    s.b1().bidQty() * s.b1().bid() * currencyRateFeed.getRate(pairs[0].substring(3)),
+                    s.b2().askQty() * s.b2().ask() * currencyRateFeed.getRate(pairs[1].substring(3)),
+                    s.b3().bidQty() * s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)));
+        };
+        log.debug("[ARB] Minimum volume — volume={} (final volume={})",
+            String.format("%.2f", minVolume), String.format("%.2f", minVolume));
 
-        // Pass 1: min available balance in USD across all three spent currencies
-        var minBalanceUsd = IntStream.range(0, pairs.length)
-            .mapToDouble(i -> {
-                var spentCcy = BUY.equals(dirs[i]) ? pairs[i].substring(3) : pairs[i].substring(0, 3);
-                return positions.getAvailableAmount(s.exchange(), spentCcy) * currencyRateFeed.getRate(spentCcy);
-            })
-            .min()
-            .orElse(0.0);
-        var effectiveOrderSize = Math.min(minBalanceUsd * 0.95, orderSizeUsd);
-        log.debug("[ARB] OrderSize pass1 — minBalanceUsd={} → capped={}",
-            String.format("%.2f", minBalanceUsd), String.format("%.2f", effectiveOrderSize));
-
-        // Pass 2: normalize to the minimum USD amount across all three pair quote currencies
-        var minLegUsd = Arrays.stream(pairs)
-            .mapToDouble(pair -> effectiveOrderSize * currencyRateFeed.getRate(pair.substring(3)))
-            .min()
-            .orElse(effectiveOrderSize);
-        log.debug("[ARB] OrderSize pass2 — minLegUsd={} (final effectiveOrderSize={})",
-            String.format("%.2f", minLegUsd), String.format("%.2f", minLegUsd));
-
-        return minLegUsd;
+        return minVolume;
     }
 
     // -------------------------------------------------------------------------
@@ -222,7 +276,7 @@ public class AutoTrader {
      * cooldown. Open-order limit, balance, and risk checks still apply.
      */
     public ManualTradeResult executeTrade(TriangleConfig config, String cycle,
-                                          List<KrakenOrderClient.OrderLeg> legs) {
+                                          List<OrderLeg> legs) {
         log.info("[MANUAL] executeTrade triangle={} exchange={} cycle={} legs={}",
             config.getId(), config.getExchange(), cycle, legs.size());
 
@@ -274,7 +328,10 @@ public class AutoTrader {
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
         var estimatedPnl = filled ? edge * notional : 0.0;
-        var signal = new Signal(exchange, config, cycleEnum, edge);
+        var b1 = new OrderBook(config.getPair1(), legs.get(0).price(), 0.0, legs.get(0).price(), 0.0);
+        var b2 = new OrderBook(config.getPair2(), legs.get(1).price(), 0.0, legs.get(1).price(), 0.0);
+        var b3 = new OrderBook(config.getPair3(), legs.get(2).price(), 0.0, legs.get(2).price(), 0.0);
+        var signal = new Signal(exchange, config, cycleEnum, edge, b1, b2, b3);
 
         var trade = finalizeExecution(signal, legResults, latencyMs, estimatedPnl, filled, "MANUAL", false);
         return new ManualTradeResult(trade.getId(), trade.getStatus(), estimatedPnl);
@@ -293,16 +350,16 @@ public class AutoTrader {
 
     /** Validates balance, risk limits, and profit threshold. Does not log — callers log with their own prefix. */
     private ValidationResult validatePreExecution(Exchange exchange, TriangleConfig config,
-                                                   String cycle, double notional, double edge) {
-        if (!hasBalanceForAllLegs(exchange, config, cycle, notional))
+                                                   String cycle, double minVolume, double profit) {
+        if (!hasBalanceForAllLegs(exchange, config, cycle, minVolume))
             return ValidationResult.reject(REJECTED_BALANCE, null);
 
-        var riskResult = risk.check(notional);
+        var riskResult = risk.check(minVolume);
         if (!riskResult.allowed())
             return ValidationResult.reject(REJECTED_RISK, riskResult.reason());
 
         var profitResult = risk.checkProfit(
-            config.getMinProfitPercent(), config.getMinProfitUsd(), edge, edge * notional);
+            config.getMinProfitPercent(), config.getMinProfitUsd(), profit, profit * minVolume);
         if (!profitResult.allowed())
             return ValidationResult.reject(REJECTED_PROFIT, profitResult.reason());
 
@@ -400,6 +457,10 @@ public class AutoTrader {
             signal.cycle(), String.format("%.5f", signal.profit()),
             String.format("%.2f", estimatedPnl), trade.getStatus(), latencyMs);
         return trade;
+    }
+
+    private double min3(double a, double b, double c) {
+        return DoubleStream.of(a, b, c).min().orElse(0);
     }
 
     // -------------------------------------------------------------------------

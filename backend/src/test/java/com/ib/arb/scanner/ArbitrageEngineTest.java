@@ -1,5 +1,6 @@
 package com.ib.arb.scanner;
 
+import com.ib.arb.engine.ArbitrageEngine;
 import com.ib.arb.marketdata.Exchange;
 import com.ib.arb.marketdata.OrderBook;
 import com.ib.arb.marketdata.OrderBookFeed;
@@ -64,9 +65,9 @@ class ArbitrageEngineTest {
                                    String pair3, double bid3, double ask3) {
         var feed = mock(OrderBookFeed.class);
         when(feed.getExchange()).thenReturn(Exchange.KRAKEN);
-        when(feed.getSnapshot(pair1)).thenReturn(new OrderBook(pair1, bid1, ask1));
-        when(feed.getSnapshot(pair2)).thenReturn(new OrderBook(pair2, bid2, ask2));
-        when(feed.getSnapshot(pair3)).thenReturn(new OrderBook(pair3, bid3, ask3));
+        when(feed.getSnapshot(pair1)).thenReturn(new OrderBook(pair1, bid1, 1_000_000.0, ask1, 1_000_000.0));
+        when(feed.getSnapshot(pair2)).thenReturn(new OrderBook(pair2, bid2, 1_000_000.0, ask2, 1_000_000.0));
+        when(feed.getSnapshot(pair3)).thenReturn(new OrderBook(pair3, bid3, 1_000_000.0, ask3, 1_000_000.0));
         return feed;
     }
 
@@ -308,9 +309,9 @@ class ArbitrageEngineTest {
         var feed = mock(OrderBookFeed.class);
         when(feed.getExchange()).thenReturn(Exchange.KRAKEN);
         // invalid: bid == ask
-        when(feed.getSnapshot("EURUSD")).thenReturn(new OrderBook("EURUSD", 1.08, 1.08));
-        when(feed.getSnapshot("USDJPY")).thenReturn(new OrderBook("USDJPY", 150.0, 150.01));
-        when(feed.getSnapshot("EURJPY")).thenReturn(new OrderBook("EURJPY", 161.5, 161.9));
+        when(feed.getSnapshot("EURUSD")).thenReturn(new OrderBook("EURUSD", 1.08, 1_000_000.0, 1.08, 1_000_000.0));
+        when(feed.getSnapshot("USDJPY")).thenReturn(new OrderBook("USDJPY", 150.0, 1_000_000.0, 150.01, 1_000_000.0));
+        when(feed.getSnapshot("EURJPY")).thenReturn(new OrderBook("EURJPY", 161.5, 1_000_000.0, 161.9, 1_000_000.0));
 
         var snapshots = engine(feed).currentSnapshots();
 
@@ -348,11 +349,11 @@ class ArbitrageEngineTest {
 
         var feed = mock(OrderBookFeed.class);
         when(feed.getExchange()).thenReturn(Exchange.KRAKEN);
-        when(feed.getSnapshot("EURUSD")).thenReturn(new OrderBook("EURUSD", 1.08, 1.081));
-        when(feed.getSnapshot("USDJPY")).thenReturn(new OrderBook("USDJPY", 150.0, 150.01));
-        when(feed.getSnapshot("EURJPY")).thenReturn(new OrderBook("EURJPY", 161.5, 161.9));
-        when(feed.getSnapshot("USDTRY")).thenReturn(new OrderBook("USDTRY", 38.5, 38.6));
-        when(feed.getSnapshot("EURTRY")).thenReturn(new OrderBook("EURTRY", 41.5, 41.6));
+        when(feed.getSnapshot("EURUSD")).thenReturn(new OrderBook("EURUSD", 1.08, 1_000_000.0, 1.081, 1_000_000.0));
+        when(feed.getSnapshot("USDJPY")).thenReturn(new OrderBook("USDJPY", 150.0, 1_000_000.0, 150.01, 1_000_000.0));
+        when(feed.getSnapshot("EURJPY")).thenReturn(new OrderBook("EURJPY", 161.5, 1_000_000.0, 161.9, 1_000_000.0));
+        when(feed.getSnapshot("USDTRY")).thenReturn(new OrderBook("USDTRY", 38.5, 1_000_000.0, 38.6, 1_000_000.0));
+        when(feed.getSnapshot("EURTRY")).thenReturn(new OrderBook("EURTRY", 41.5, 1_000_000.0, 41.6, 1_000_000.0));
 
         var snapshots = engine(repo, feed).currentSnapshots();
 

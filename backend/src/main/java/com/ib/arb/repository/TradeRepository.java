@@ -4,6 +4,7 @@ import com.ib.arb.model.Trade;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -20,4 +21,7 @@ public interface TradeRepository extends JpaRepository<Trade, Long> {
 
     @Query("SELECT t FROM Trade t LEFT JOIN FETCH t.legs WHERE t.id = :id")
     Optional<Trade> findByIdWithLegs(@Param("id") Long id);
+
+    @Transactional
+    void deleteByStatus(String status);
 }

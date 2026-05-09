@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/trades
+    username: ${DB_USER:arbitrage}
+    password: ${DB_PASS:yyQjYDvhKRsLphXl@4567}
+
+logging:
+  file:
+    name: /opt/arb/logs/arb.log
+  level:
+    "[com.ib.arb]": INFO

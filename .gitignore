@@ -17,5 +17,8 @@ backend/.metals/
 backend/src/main/resources/application-local.yml
 *.env
 
+# logs
+logs/
+
 # Claude local config
 .claude/settings.local.json

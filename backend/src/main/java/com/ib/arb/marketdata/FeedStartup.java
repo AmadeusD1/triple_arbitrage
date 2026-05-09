@@ -1,6 +1,6 @@
 package com.ib.arb.marketdata;
 
-import com.ib.arb.scanner.ArbitrageEngine;
+import com.ib.arb.engine.ArbitrageEngine;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;

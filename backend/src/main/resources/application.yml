@@ -1,8 +1,4 @@
 spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/trades
-    username: ${DB_USER:arbitrage}
-    password: ${DB_PASS:yyQjYDvhKRsLphXl@4567}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -18,10 +14,8 @@ arb:
 
 kraken:
   ws-url: wss://ws.kraken.com/v2
-  api-key: CuUXlJ6bnW9iHEEiHvJiJ+1e+vkEPj7igCAbqM4UyOI4NqvCel+2aI4f
-  #${KRAKEN_API_KEY:}
-  api-secret: 2+xhOGxgWPDLgDyenaoOkabb79c0sTtu02FNPIpphOKZzZe209Le+NKYDPm5pfLMHy66DCnA5QeuWGXqSawzyA==
-  #${KRAKEN_API_SECRET:}
+  api-key: ${KRAKEN_API_KEY:}
+  api-secret: ${KRAKEN_API_SECRET:}
   position-cache-ttl-ms: 2000
 
 currency:
@@ -35,4 +29,4 @@ alert:
 app:
   admin:
     username: ${ADMIN_USERNAME:admin}
-    password: ${ADMIN_PASSWORD:yyQjYDvhKRsLphXl@}
+    password: ${ADMIN_PASSWORD:}

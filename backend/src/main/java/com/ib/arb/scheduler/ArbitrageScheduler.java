@@ -1,7 +1,7 @@
 package com.ib.arb.scheduler;
 
 import com.ib.arb.config.DashboardWebSocketHandler;
-import com.ib.arb.execution.AutoTrader;
+import com.ib.arb.engine.AutoTrader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;

@@ -1,0 +1,59 @@
+---
+# ── Build and deploy the backend service only ─────────────────────────────────
+# Run: ansible-playbook -i inventory.ini app.yml -e "ansible_become_password=..."
+
+- name: Build backend JAR
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Build backend JAR
+      command: ./gradlew bootJar
+      args:
+        chdir: "{{ playbook_dir }}/../backend"
+      changed_when: true
+
+- name: Deploy backend service
+  hosts: appservers
+  become: true
+
+  handlers:
+    - name: restart arb
+      systemd:
+        name: arb
+        state: restarted
+        daemon_reload: true
+
+  tasks:
+    - name: Create log directory
+      file:
+        path: "{{ app_dir }}/logs"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    - name: Upload JAR
+      copy:
+        src: "{{ playbook_dir }}/../backend/build/libs/arb.jar"
+        dest: "{{ app_dir }}/arb.jar"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0640"
+      notify: restart arb
+
+    - name: Write environment file
+      template:
+        src: templates/arb.env.j2
+        dest: /etc/arb/arb.env
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0640"
+      notify: restart arb
+
+    - name: Install systemd service
+      template:
+        src: templates/arb.service.j2
+        dest: /etc/systemd/system/arb.service
+        mode: "0644"
+      notify: restart arb

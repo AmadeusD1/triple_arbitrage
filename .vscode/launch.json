@@ -12,10 +12,19 @@
         },
         {
             "type": "java",
-            "name": "ArbitrageApplication",
+            "name": "ArbitrageApplication (dev)",
             "request": "launch",
             "mainClass": "com.ib.arb.ArbitrageApplication",
-            "projectName": "arb-backend"
+            "projectName": "arb-backend",
+            "args": "--spring.profiles.active=dev"
+        },
+        {
+            "type": "java",
+            "name": "ArbitrageApplication (prod)",
+            "request": "launch",
+            "mainClass": "com.ib.arb.ArbitrageApplication",
+            "projectName": "arb-backend",
+            "args": "--spring.profiles.active=prod"
         }
     ]
 }

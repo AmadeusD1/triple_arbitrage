@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
 
-    <springProperty name="LOG_FILE" source="logging.file.name" defaultValue="/var/log/triangletrader/arb.log"/>
+    <springProperty name="LOG_FILE" source="logging.file.name" defaultValue="./logs/arb.log"/>
 
     <!-- Console appender (dev + systemd journal) -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">

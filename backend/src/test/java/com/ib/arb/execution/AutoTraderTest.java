@@ -3,8 +3,10 @@ package com.ib.arb.execution;
 import com.ib.arb.alert.AlertService;
 import com.ib.arb.broker.KrakenOrderClient;
 import com.ib.arb.broker.KrakenOrderClient.LegResult;
+import com.ib.arb.broker.OrderLeg;
 import com.ib.arb.marketdata.Exchange;
 import com.ib.arb.marketdata.CurrencyRateFeed;
+import com.ib.arb.marketdata.OrderBook;
 import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TriangleConfig;
@@ -13,7 +15,8 @@ import com.ib.arb.repository.MissedOpportunityRepository;
 import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.risk.RiskService;
-import com.ib.arb.scanner.ArbitrageEngine;
+import com.ib.arb.engine.AutoTrader;
+import com.ib.arb.engine.ArbitrageEngine;
 import com.ib.arb.scanner.Cycle;
 import com.ib.arb.scanner.Signal;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,7 +56,9 @@ class AutoTraderTest {
         TRI.setExchange("KRAKEN");
     }
 
-    static final Signal SIGNAL_A = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.001);
+    static final OrderBook OB = new OrderBook("EURUSD", 1.08, 1_000_000.0, 1.081, 1_000_000.0);
+
+    static final Signal SIGNAL_A = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.001, OB, OB, OB);
 
     static final List<LegResult> THREE_FILLED_LEGS = List.of(
         new LegResult(1, "EURUSD", "BUY",  1.0801, 92584.0, true,  "TXID-1"),
@@ -170,7 +175,7 @@ class AutoTraderTest {
     void live_recordsFill_with3Legs() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeOrder(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
+        when(broker.placeOrderLegs(any())).thenReturn(THREE_FILLED_LEGS);
         when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
@@ -195,7 +200,7 @@ class AutoTraderTest {
     void live_recordsCancelled_withPartialLegs_andIncrementsMissed() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeOrder(any(), anyDouble())).thenReturn(ONE_FAILED_LEG);
+        when(broker.placeOrderLegs(any())).thenReturn(ONE_FAILED_LEG);
         when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
@@ -217,7 +222,7 @@ class AutoTraderTest {
     void live_recordsCancelled_whenBrokerReturnsEmpty() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeOrder(any(), anyDouble())).thenReturn(List.of());
+        when(broker.placeOrderLegs(any())).thenReturn(List.of());
         when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
@@ -234,7 +239,7 @@ class AutoTraderTest {
     void incrementStats_notCalled_whenCancelled() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
-        when(broker.placeOrder(any(), anyDouble())).thenReturn(ONE_FAILED_LEG);
+        when(broker.placeOrderLegs(any())).thenReturn(ONE_FAILED_LEG);
         when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
@@ -254,8 +259,8 @@ class AutoTraderTest {
         when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
         when(broker.computeLegs(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
 
-        var sig1 = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.001);
-        var sig2 = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.003);
+        var sig1 = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.001, OB, OB, OB);
+        var sig2 = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.003, OB, OB, OB);
         when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(sig1), Optional.of(sig2));
 
         autoTrader.attemptArbitrage();
@@ -289,7 +294,7 @@ class AutoTraderTest {
 
     @Test
     void cycleB_checksBaseCurrency() {
-        var signalB = new Signal(Exchange.KRAKEN, TRI, Cycle.BSS, 0.001);
+        var signalB = new Signal(Exchange.KRAKEN, TRI, Cycle.BSS, 0.001, OB, OB, OB);
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(broker.computeLegs(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
@@ -305,10 +310,10 @@ class AutoTraderTest {
 
     // ── executeTrade (manual) — early rejections ──────────────────────────────
 
-    static final List<KrakenOrderClient.OrderLeg> MANUAL_LEGS = List.of(
-        new KrakenOrderClient.OrderLeg(1, "EURUSD", "BUY",  1.0801, 10_000.0),
-        new KrakenOrderClient.OrderLeg(2, "USDJPY", "BUY",  150.01,    72.0),
-        new KrakenOrderClient.OrderLeg(3, "EURJPY", "SELL", 162.00,    67.0)
+    static final List<OrderLeg> MANUAL_LEGS = List.of(
+        new OrderLeg(1, "EURUSD", "BUY",  1.0801, 10_000.0),
+        new OrderLeg(2, "USDJPY", "BUY",  150.01,    72.0),
+        new OrderLeg(3, "EURJPY", "SELL", 162.00,    67.0)
     );
     // notional = leg1.price × leg1.volume = 1.0801 × 10_000 ≈ 10_801 USD
 
@@ -511,7 +516,7 @@ class AutoTraderTest {
     void attemptArbitrage_rejected_whenProfitBelowThreshold() {
         // signal profit (0.0001) is below TRI.minProfitPercent (0.00025)
         TRI.setMinProfitPercent(0.00025);
-        var lowProfitSignal = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.0001);
+        var lowProfitSignal = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.0001, OB, OB, OB);
 
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);

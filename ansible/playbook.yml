@@ -84,7 +84,7 @@
 
     - name: Create log directory
       file:
-        path: /var/log/triangletrader
+        path: "{{ app_dir }}/logs"
         state: directory
         owner: "{{ app_user }}"
         group: "{{ app_user }}"

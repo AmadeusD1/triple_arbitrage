@@ -98,11 +98,13 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
                 var pair = toPair(entry.path("symbol").asText());
                 var current = snapshots.get(pair);
 
-                var bid = bestPrice(entry.path("bids"), current != null ? current.bid() : 0);
-                var ask = bestPrice(entry.path("asks"), current != null ? current.ask() : 0);
+                var bid    = bestPrice(entry.path("bids"), current != null ? current.bid() : 0);
+                var bidQty = bestQty(entry.path("bids"), current != null ? current.bidQty() : 0);
+                var ask    = bestPrice(entry.path("asks"), current != null ? current.ask() : 0);
+                var askQty = bestQty(entry.path("asks"), current != null ? current.askQty() : 0);
 
                 if (bid > 0 && ask > 0) {
-                    snapshots.put(pair, new OrderBook(pair, bid, ask));
+                    snapshots.put(pair, new OrderBook(pair, bid, bidQty, ask, askQty));
                 }
             }
         } catch (Exception ignored) {}
@@ -112,6 +114,13 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
         if (array.isArray() && !array.isEmpty()) {
             var price = array.get(0).path("price").asDouble();
             if (price > 0) return price;
+        }
+        return fallback;
+    }
+
+    private double bestQty(JsonNode array, double fallback) {
+        if (array.isArray() && !array.isEmpty()) {
+            return array.get(0).path("qty").asDouble();
         }
         return fallback;
     }

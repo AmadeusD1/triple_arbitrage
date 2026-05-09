@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/trades
+    username: postgres
+    password: postgres
+
+logging:
+  file:
+    name: ./logs/arb.log
+  level:
+    "[com.ib.arb]": DEBUG

@@ -39,26 +39,36 @@ class KrakenOrderBookFeedTest {
 
     @Test
     void orderBook_isValid_whenBidLessThanAsk() {
-        assertThat(new OrderBook("EURUSD", 1.08, 1.081).isValid()).isTrue();
+        assertThat(new OrderBook("EURUSD", 1.08, 1_000.0, 1.081, 1_000.0).isValid()).isTrue();
     }
 
     @Test
     void orderBook_isInvalid_whenBidZero() {
-        assertThat(new OrderBook("EURUSD", 0.0, 1.081).isValid()).isFalse();
+        assertThat(new OrderBook("EURUSD", 0.0, 1_000.0, 1.081, 1_000.0).isValid()).isFalse();
     }
 
     @Test
     void orderBook_isInvalid_whenAskZero() {
-        assertThat(new OrderBook("EURUSD", 1.08, 0.0).isValid()).isFalse();
+        assertThat(new OrderBook("EURUSD", 1.08, 1_000.0, 0.0, 1_000.0).isValid()).isFalse();
+    }
+
+    @Test
+    void orderBook_isInvalid_whenBidQtyZero() {
+        assertThat(new OrderBook("EURUSD", 1.08, 0.0, 1.081, 1_000.0).isValid()).isFalse();
+    }
+
+    @Test
+    void orderBook_isInvalid_whenAskQtyZero() {
+        assertThat(new OrderBook("EURUSD", 1.08, 1_000.0, 1.081, 0.0).isValid()).isFalse();
     }
 
     @Test
     void orderBook_isInvalid_whenBidEqualsAsk() {
-        assertThat(new OrderBook("EURUSD", 1.08, 1.08).isValid()).isFalse();
+        assertThat(new OrderBook("EURUSD", 1.08, 1_000.0, 1.08, 1_000.0).isValid()).isFalse();
     }
 
     @Test
     void orderBook_isInvalid_whenBidExceedsAsk() {
-        assertThat(new OrderBook("EURUSD", 1.082, 1.081).isValid()).isFalse();
+        assertThat(new OrderBook("EURUSD", 1.082, 1_000.0, 1.081, 1_000.0).isValid()).isFalse();
     }
 }

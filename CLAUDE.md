@@ -23,8 +23,8 @@ backend/
     marketdata/      # WebSocket order book feeds (KrakenOrderBookFeed + future sources)
     position/        # PositionClient interface, KrakenPositionClient, PositionService
     common/          # Constants (Direction, TradeStatus, LegStatus, TriangleStatus)
-    scanner/         # ArbitrageEngine, Cycle enum, Signal — triangle edge detection
-    execution/       # AutoTrader — orchestrates scan → risk → order → record
+    engine/          # ArbitrageEngine (edge detection) + AutoTrader (scan → risk → order → record)
+    scanner/         # Cycle enum, Signal — shared data types for engine
     risk/            # RiskService — position limit, daily loss hard-stop, profit threshold
     analytics/       # AnalyticsService — win rate, Sharpe, equity curve, daily P&L
     scheduler/       # ArbitrageScheduler — @Scheduled scan + broadcast loops
@@ -41,6 +41,10 @@ backend/
   src/test/java/com/ib/arb/
     scanner/         # ArbitrageEngineTest
     execution/       # AutoTraderTest
+  src/main/resources/
+    application.yml              # shared config (JPA, arb, kraken, alert)
+    application-dev.yml          # dev profile: local postgres, DEBUG logging → ./logs/arb.log
+    application-prod.yml         # prod profile: env-var credentials, INFO logging → /opt/arb/logs/arb.log
     risk/            # RiskServiceTest
     analytics/       # AnalyticsServiceTest
     marketdata/      # KrakenOrderBookFeedTest
@@ -62,15 +66,28 @@ db/
     init.sql         # single combined migration: all tables + seed data
 
 ansible/
-  deploy.sh          # local: builds artifacts then runs playbook
-  inventory.ini      # target host(s)
-  requirements.yml   # community.postgresql collection
+  deploy.sh          # local: builds artifacts then runs playbook.yml
+  inventory.ini      # target host (137.220.36.152, user: arbitrage)
+  requirements.yml   # community.postgresql, community.general, ansible.posix
   group_vars/
     all.yml          # all deployment variables
-  playbook.yml       # full deployment playbook
+  playbook.yml       # full deployment (postgres + app + nginx + SELinux + firewalld)
+  postgres.yml       # PostgreSQL-only provisioning (standalone)
+  app.yml            # backend JAR + service restart only (fast iterative deploys)
   templates/         # arb.env.j2, arb.service.j2, nginx-arb.conf.j2,
                      #   start/stop/restart/status.sh.j2
 ```
+
+## Spring Profiles
+
+| Profile | Datasource | Log file | Log level |
+|---|---|---|---|
+| `dev` | `postgres`/`postgres` @ localhost | `./logs/arb.log` | DEBUG |
+| `prod` | `${DB_USER}`/`${DB_PASS}` | `/opt/arb/logs/arb.log` | INFO |
+
+Activate via:
+- **VS Code:** launch config `ArbitrageApplication (dev)` / `(prod)` (sets `--spring.profiles.active=...`)
+- **Server:** `SPRING_PROFILES_ACTIVE=prod` injected by `arb.env.j2`
 
 ## Build & Run (backend)
 
@@ -158,9 +175,9 @@ Strategy pattern: `PositionClient` interface per exchange, `KrakenPositionClient
 
 Key methods:
 - `hasAvailableBalance(exchange, isoCurrency, requiredAmount)` — boolean check used by `hasBalanceForAllLegs()`
-- `getAvailableAmount(exchange, isoCurrency)` — returns raw balance amount; used by `computeEffectiveOrderSize()` in `AutoTrader`
+- `getAvailableAmount(exchange, isoCurrency)` — returns raw balance amount; used by `computeMinimumVolume()` in `AutoTrader`
 
-### Cycle Enum (`scanner/Cycle.java`)
+### Cycle Enum (`scanner/Cycle.java`) — referenced by `engine/`
 
 Each triangle has exactly one cycle stored in its DB row (`cycle TEXT`). The `Cycle` enum encodes the direction array for that cycle:
 
@@ -340,7 +357,7 @@ alert:
 
 | Key | Default | Description |
 |---|---|---|
-| `order-size-usd` | `100000` | **Maximum** notional USD trade size per cycle. `AutoTrader` computes a dynamic `effectiveOrderSize` per signal (capped at this value) based on available balances — see `computeEffectiveOrderSize()`. |
+| `order-size-usd` | `100000` | **Maximum** notional USD trade size per cycle. `AutoTrader` computes a `balanceCap` (from available balances) and `liquidityCap` (from order book depth) and takes the minimum — see `computeMinimumVolume()`. |
 | `edge-threshold` | `0.00025` | Minimum profit edge to consider an opportunity valid |
 | `scan-interval-ms` | `1000` | Milliseconds between scanner cycles |
 | `trade-cooldown-ms` | `10000` | Cooldown after a trade before the next attempt |
@@ -351,7 +368,7 @@ alert:
 
 | Key | Default | Description |
 |---|---|---|
-| `feed-url` | `ws://localhost:7070/api/ws/global` | WebSocket URL of the crypto-aggregator that pushes live FX rates. Used by `CurrencyRateFeed` to populate `getUSDValue()` in `AutoTrader`. |
+| `feed-url` | `ws://localhost:7070/api/ws/global` | WebSocket URL of the crypto-aggregator that pushes live FX rates. Used by `CurrencyRateFeed.getRate()` in `AutoTrader`. |
 
 ## Frontend (React + TypeScript + MUI)
 

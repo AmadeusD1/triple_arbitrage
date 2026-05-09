@@ -3,11 +3,15 @@ package com.ib.arb.api;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TradeLeg;
 import com.ib.arb.repository.TradeRepository;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import static com.ib.arb.common.Constants.TradeStatus.SIMULATION;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -25,6 +29,12 @@ public class TradeController {
     @GetMapping
     public ResponseEntity<List<Trade>> recent() {
         return ResponseEntity.ok(tradeRepo.findTop20ByOrderByTimeDesc());
+    }
+
+    @DeleteMapping("/simulation")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteSimulationTrades() {
+        tradeRepo.deleteByStatus(SIMULATION);
     }
 
     @GetMapping("/{id}")
