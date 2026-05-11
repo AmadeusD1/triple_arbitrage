@@ -14,6 +14,8 @@ public interface TradeRepository extends JpaRepository<Trade, Long> {
 
     List<Trade> findTop20ByOrderByTimeDesc();
 
+    List<Trade> findAllByOrderByTimeDesc();
+
     List<Trade> findByTimeAfter(LocalDateTime since);
 
     @Query("SELECT SUM(t.pnl) FROM Trade t WHERE t.time >= :since")

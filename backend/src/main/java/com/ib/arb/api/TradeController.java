@@ -28,7 +28,7 @@ public class TradeController {
 
     @GetMapping
     public ResponseEntity<List<Trade>> recent() {
-        return ResponseEntity.ok(tradeRepo.findTop20ByOrderByTimeDesc());
+        return ResponseEntity.ok(tradeRepo.findAllByOrderByTimeDesc());
     }
 
     @DeleteMapping("/simulation")

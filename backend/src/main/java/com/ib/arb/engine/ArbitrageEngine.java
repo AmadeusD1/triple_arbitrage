@@ -148,10 +148,10 @@ public class ArbitrageEngine {
         var cycle = Cycle.valueOf(config.getCycle() != null ? config.getCycle() : "BBS");
 
         var edge = switch (cycle) {
-            case BBS -> b1.bid() * b2.bid() - b3.ask();
-            case BSS -> b1.bid() - b2.ask() * b3.ask();
-            case BSB -> 1.0/b1.bid() * b2.ask() - b3.bid();
-            case SBS -> 1.0/b1.ask() * b2.bid() - b3.ask();
+            case BBS -> b1.ask() * b2.ask() - b3.bid();
+            case BSS -> b1.ask() - b2.bid() * b3.bid();
+            case BSB -> 1.0 / b1.ask() * b2.bid() - b3.ask();
+            case SBS -> 1.0 / b1.bid() * b2.ask() - b3.bid();
         };
 
         if (edge > 0 && edge > threshold) {

@@ -2,13 +2,11 @@ import { useEffect, useState } from 'react';
 import {
   Box, Button, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
   IconButton, Paper, Table, TableBody, TableCell, TableContainer, TableHead,
-  TableRow, Typography,
+  TablePagination, TableRow, Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { getTrade, deleteSimulationTrades } from '../api/rest';
+import { getTrade, getTrades, deleteSimulationTrades } from '../api/rest';
 import type { Trade, TradeDetail, LegStatus } from '../types';
-
-interface Props { trades: Trade[] }
 
 const LEG_STATUS_COLOR: Record<LegStatus, 'success' | 'error' | 'default'> = {
   FILLED:    'success',
@@ -78,14 +76,24 @@ function TradeDetailDialog({ tradeId, onClose }: { tradeId: number | null; onClo
   );
 }
 
-export default function Trades({ trades }: Props) {
+export default function Trades() {
+  const [trades, setTrades] = useState<Trade[]>([]);
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+
+  const loadTrades = () => getTrades().then((res) => setTrades(res.data));
+
+  useEffect(() => { loadTrades(); }, []);
 
   const handleDeleteSimulations = async () => {
     setDeleting(true);
-    try { await deleteSimulationTrades(); } finally { setDeleting(false); }
+    try { await deleteSimulationTrades(); await loadTrades(); setPage(0); }
+    finally { setDeleting(false); }
   };
+
+  const visibleTrades = trades.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
 
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
@@ -110,7 +118,7 @@ export default function Trades({ trades }: Props) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {trades.map((t) => (
+              {visibleTrades.map((t) => (
                 <TableRow key={t.id} hover sx={{ cursor: 'pointer' }}
                   onClick={() => setSelectedTradeId(t.id)}>
                   <TableCell>{new Date(t.time + 'Z').toLocaleString()}</TableCell>
@@ -137,6 +145,15 @@ export default function Trades({ trades }: Props) {
             </TableBody>
           </Table>
         </TableContainer>
+        <TablePagination
+          component="div"
+          count={trades.length}
+          page={page}
+          rowsPerPage={rowsPerPage}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={(_, p) => setPage(p)}
+          onRowsPerPageChange={(e) => { setRowsPerPage(+e.target.value); setPage(0); }}
+        />
       </Paper>
 
       <TradeDetailDialog tradeId={selectedTradeId} onClose={() => setSelectedTradeId(null)} />

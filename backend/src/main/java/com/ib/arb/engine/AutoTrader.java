@@ -17,6 +17,7 @@ import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.risk.RiskService;
 import static com.ib.arb.common.Constants.Direction.BUY;
+import static com.ib.arb.common.Constants.Direction.SELL;
 import static com.ib.arb.common.Constants.LegStatus.FAILED;
 import static com.ib.arb.common.Constants.LegStatus.SIMULATED;
 import static com.ib.arb.common.Constants.TradeStatus.CANCELLED;
@@ -40,15 +41,22 @@ import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 
 /**
- * Orchestrates arbitrage cycles (automated and manual): scan → validate → execute → record → broadcast.
+ * Orchestrates arbitrage cycles (automated and manual): scan → validate →
+ * execute → record → broadcast.
  *
- * <p>Automated path (called by {@code ArbitrageScheduler}):
- * {@code attemptArbitrage()} guards + scans, then delegates to {@code executeArbitrage(Signal)}.
+ * <p>
+ * Automated path (called by {@code ArbitrageScheduler}):
+ * {@code attemptArbitrage()} guards + scans, then delegates to
+ * {@code executeArbitrage(Signal)}.
  *
- * <p>Manual path (called by {@code ArbitrageController}):
- * {@code executeTrade()} accepts caller-provided legs and bypasses the cooldown.
+ * <p>
+ * Manual path (called by {@code ArbitrageController}):
+ * {@code executeTrade()} accepts caller-provided legs and bypasses the
+ * cooldown.
  *
- * <p>Both paths share {@code validatePreExecution()} and {@code finalizeExecution()} helpers.
+ * <p>
+ * Both paths share {@code validatePreExecution()} and
+ * {@code finalizeExecution()} helpers.
  */
 @Service
 public class AutoTrader {
@@ -82,10 +90,10 @@ public class AutoTrader {
     private long tradeCooldownMs;
 
     public AutoTrader(ArbitrageEngine arbitrageEngine, PositionService positions,
-                      RiskService risk, KrakenOrderClient broker,
-                      TradeRepository tradeRepo, AlertService alerts,
-                      TriangleConfigRepository triangleConfigRepo, CurrencyRateFeed currencyRateFeed,
-                      MissedOpportunityRepository missedOpportunityRepo) {
+            RiskService risk, KrakenOrderClient broker,
+            TradeRepository tradeRepo, AlertService alerts,
+            TriangleConfigRepository triangleConfigRepo, CurrencyRateFeed currencyRateFeed,
+            MissedOpportunityRepository missedOpportunityRepo) {
         this.arbitrageEngine = arbitrageEngine;
         this.positions = positions;
         this.risk = risk;
@@ -103,7 +111,8 @@ public class AutoTrader {
 
     /**
      * Guards (cooldown + open-order limit) → scans for a signal → delegates to
-     * {@link #executeArbitrage(Signal)}. Returns immediately (with a broadcast) on any guard failure
+     * {@link #executeArbitrage(Signal)}. Returns immediately (with a broadcast) on
+     * any guard failure
      * or when no profitable signal is found.
      */
     public void attemptArbitrage() {
@@ -134,48 +143,48 @@ public class AutoTrader {
         detected++;
         totalEdge += s.profit();
         log.info("[ARB] Signal detected — triangle={} exchange={} cycle={} profit={}",
-            s.config().getId(), s.exchange(), s.cycle(), String.format("%.5f", s.profit()));
+                s.config().getId(), s.exchange(), s.cycle(), String.format("%.5f", s.profit()));
 
         var liquidityCap = computeMinimumVolume(s);
         log.info("[ARB] Liquidity cap — {}", String.format("%.2f", liquidityCap));
-        var pairs = new String[]{ s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
-        var dirs  = s.cycle().dirs;
+        var pairs = new String[] { s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
+        var dirs = s.cycle().dirs;
 
         // Pass 1: min available balance in USD across all three spent currencies
         var minBalanceUsd = IntStream.range(0, pairs.length)
-            .mapToDouble(i -> {
-                var spentCcy = BUY.equals(dirs[i]) ? pairs[i].substring(3) : pairs[i].substring(0, 3);
-                return positions.getAvailableAmount(s.exchange(), spentCcy) * currencyRateFeed.getRate(spentCcy);
-            })
-            .min()
-            .orElse(0.0);
+                .mapToDouble(i -> {
+                    var spentCcy = BUY.equals(dirs[i]) ? pairs[i].substring(3) : pairs[i].substring(0, 3);
+                    return positions.getAvailableAmount(s.exchange(), spentCcy) * currencyRateFeed.getRate(spentCcy);
+                })
+                .min()
+                .orElse(0.0);
         var balanceCap = Math.min(minBalanceUsd * 0.95, orderSizeUsd);
         log.debug("[ARB] Balance cap — minBalanceUsd={} → capped={}",
-            String.format("%.2f", minBalanceUsd), String.format("%.2f", balanceCap));
+                String.format("%.2f", minBalanceUsd), String.format("%.2f", balanceCap));
 
         var orderSize = Math.min(liquidityCap, balanceCap);
 
-        //TODO: change checks
+        // TODO: change checks
         var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), orderSize, s.profit());
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
                 case REJECTED_BALANCE -> log.warn("[ARB] Missed — insufficient balance for triangle={} cycle={}",
-                    s.config().getId(), s.cycle());
-                case REJECTED_RISK    -> log.warn("[ARB] Missed — risk check failed: {}", v.reason());
-                case REJECTED_PROFIT  -> log.warn("[ARB] Missed — profit threshold not met: {}", v.reason());
+                        s.config().getId(), s.cycle());
+                case REJECTED_RISK -> log.warn("[ARB] Missed — risk check failed: {}", v.reason());
+                case REJECTED_PROFIT -> log.warn("[ARB] Missed — profit threshold not met: {}", v.reason());
             }
             missedOpportunityRepo.save(new MissedOpportunity()
-                .setTime(LocalDateTime.now())
-                .setTriangleId(s.config().getId())
-                .setExchange(s.exchange().name())
-                .setPair1(s.config().getPair1())
-                .setPair2(s.config().getPair2())
-                .setPair3(s.config().getPair3())
-                .setCycle(s.cycle().name())
-                .setEdge(s.profit())
-                .setOrderSize(orderSize)
-                .setRejection(v.rejectionStatus())
-                .setReason(v.reason()));
+                    .setTime(LocalDateTime.now())
+                    .setTriangleId(s.config().getId())
+                    .setExchange(s.exchange().name())
+                    .setPair1(s.config().getPair1())
+                    .setPair2(s.config().getPair2())
+                    .setPair3(s.config().getPair3())
+                    .setCycle(s.cycle().name())
+                    .setEdge(s.profit())
+                    .setOrderSize(orderSize)
+                    .setRejection(v.rejectionStatus())
+                    .setReason(v.reason()));
             missed++;
             return;
         }
@@ -184,65 +193,100 @@ public class AutoTrader {
             executing = true;
         }
 
-        List<OrderLeg> legs = switch (s.cycle()) {
+        var legs = switch (s.cycle()) {
             case BBS -> List.of(
-                new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
-                    orderSize / (s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)))),
-                new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(),
-                    orderSize / (s.b2().ask() * currencyRateFeed.getRate(pairs[1].substring(3)))),
-                new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
-                    orderSize / (s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)))));
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
+                            orderSize / (currencyRateFeed.getRate(pairs[0].substring(0, 3)))
+                                    * currencyRateFeed.getRate(pairs[0].substring(0, 3))
+                                    / currencyRateFeed.getRate(pairs[0].substring(3))),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(),
+                            orderSize / (currencyRateFeed.getRate(pairs[1].substring(0, 3)))),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
+                            orderSize / (currencyRateFeed.getRate(pairs[2].substring(0, 3)))
+                                    * currencyRateFeed.getRate(pairs[2].substring(0, 3))
+                                    / currencyRateFeed.getRate(pairs[2].substring(3))));
             case BSS -> List.of(
-                new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
-                    orderSize / (s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)))),
-                new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(),
-                    orderSize / (s.b2().bid() * currencyRateFeed.getRate(pairs[1].substring(3)))),
-                new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
-                    orderSize / (s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)))));
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
+                            orderSize / (currencyRateFeed.getRate(pairs[0].substring(0, 3)))
+                                    * currencyRateFeed.getRate(pairs[0].substring(0, 3))
+                                    / currencyRateFeed.getRate(pairs[0].substring(3))),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(),
+                            orderSize / (currencyRateFeed.getRate(pairs[1].substring(0, 3)))),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
+                            orderSize / (currencyRateFeed.getRate(pairs[2].substring(0, 3)))
+                                    * currencyRateFeed.getRate(pairs[2].substring(0, 3))));
             case BSB -> List.of(
-                new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
-                    orderSize / (s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)))),
-                new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(),
-                    orderSize / (s.b2().bid() * currencyRateFeed.getRate(pairs[1].substring(3)))),
-                new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(),
-                    orderSize / (s.b3().ask() * currencyRateFeed.getRate(pairs[2].substring(3)))));
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
+                            orderSize / (currencyRateFeed.getRate(pairs[0].substring(0, 3)))
+                                    * currencyRateFeed.getRate(pairs[0].substring(0, 3))
+                                    / currencyRateFeed.getRate(pairs[0].substring(3))),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(),
+                            orderSize / (currencyRateFeed.getRate(pairs[1].substring(0, 3)))),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(),
+                            orderSize / (currencyRateFeed.getRate(pairs[2].substring(0, 3)))
+                                    * currencyRateFeed.getRate(pairs[2].substring(0, 3))
+                                    / currencyRateFeed.getRate(pairs[2].substring(3))));
             case SBS -> List.of(
-                new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(),
-                    orderSize / (s.b1().bid() * currencyRateFeed.getRate(pairs[0].substring(3)))),
-                new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(),
-                    orderSize / (s.b2().ask() * currencyRateFeed.getRate(pairs[1].substring(3)))),
-                new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
-                    orderSize / (s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)))));
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(),
+                            orderSize / (currencyRateFeed.getRate(pairs[0].substring(0, 3)))),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(),
+                            orderSize / (currencyRateFeed.getRate(pairs[1].substring(0, 3)))
+                                    * currencyRateFeed.getRate(pairs[1].substring(0, 3))
+                                    / currencyRateFeed.getRate(pairs[1].substring(3))),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
+                            orderSize / (currencyRateFeed.getRate(pairs[2].substring(0, 3)))));
         };
 
-        log.info("[ARB] Placing orders — triangle={} cycle={} orderSize={}",
-            s.config().getId(), s.cycle(), orderSize);
+        var expectedPnl = computePnlFromLegs(legs, orderSize);
+        if (expectedPnl < s.config().getMinProfitUsd()) {
+            log.warn("[ARB] Missed — expected leg P&L ${} below minimum ${}",
+                    String.format("%.2f", expectedPnl), String.format("%.2f", s.config().getMinProfitUsd()));
+            missedOpportunityRepo.save(new MissedOpportunity()
+                    .setTime(LocalDateTime.now())
+                    .setTriangleId(s.config().getId())
+                    .setExchange(s.exchange().name())
+                    .setPair1(s.config().getPair1())
+                    .setPair2(s.config().getPair2())
+                    .setPair3(s.config().getPair3())
+                    .setCycle(s.cycle().name())
+                    .setEdge(s.profit())
+                    .setOrderSize(orderSize)
+                    .setRejection(REJECTED_PROFIT)
+                    .setReason(String.format("leg P&L $%.2f < min $%.2f", expectedPnl, s.config().getMinProfitUsd())));
+            missed++;
+            executing = false;
+            return;
+        }
+
+        log.info("[ARB] Placing orders — triangle={} cycle={} orderSize={} expectedPnl={}",
+                s.config().getId(), s.cycle(), orderSize, String.format("%.2f", expectedPnl));
         var start = System.currentTimeMillis();
         List<LegResult> legResults;
         if (broker.isSimulation()) {
             legResults = legs.stream()
-                .map(l -> new LegResult(l.legIndex(), l.pair(), l.direction(),
-                    l.price(), l.volume(), true, null))
-                .toList();
+                    .map(l -> new LegResult(l.legIndex(), l.pair(), l.direction(),
+                            l.price(), l.volume(), true, null))
+                    .toList();
             log.info("[SIM] Cycle {} | {} | profit={}", s.cycle(),
-                legResults.stream()
-                    .map(l -> l.direction() + " " + l.pair())
-                    .reduce((a, b) -> a + ", " + b).orElse(""),
-                String.format("%.5f", s.profit()));
+                    legResults.stream()
+                            .map(l -> l.direction() + " " + l.pair())
+                            .reduce((a, b) -> a + ", " + b).orElse(""),
+                    String.format("%.5f", s.profit()));
         } else {
             legResults = broker.placeOrderLegs(legs);
         }
         var latencyMs = System.currentTimeMillis() - start;
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
-        var estimatedPnl = filled ? s.profit() * orderSize : 0.0;
+        var estimatedPnl = filled ? computePnlFromResults(legResults, orderSize) : 0.0;
 
         finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true);
     }
 
     private double computeMinimumVolume(Signal s) {
-        var pairs = new String[]{ s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
-        // compute the minimum volume in USD across all three legs, based on price levels and currency rates
+        var pairs = new String[] { s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
+        // compute the minimum volume in USD across all three legs, based on price
+        // levels and currency rates
         double minVolume = switch (s.cycle()) {
             case BBS -> min3(
                     s.b1().askQty() * s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)),
@@ -262,7 +306,7 @@ public class AutoTrader {
                     s.b3().bidQty() * s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)));
         };
         log.debug("[ARB] Minimum volume — volume={} (final volume={})",
-            String.format("%.2f", minVolume), String.format("%.2f", minVolume));
+                String.format("%.2f", minVolume), String.format("%.2f", minVolume));
 
         return minVolume;
     }
@@ -276,9 +320,9 @@ public class AutoTrader {
      * cooldown. Open-order limit, balance, and risk checks still apply.
      */
     public ManualTradeResult executeTrade(TriangleConfig config, String cycle,
-                                          List<OrderLeg> legs) {
+            List<OrderLeg> legs) {
         log.info("[MANUAL] executeTrade triangle={} exchange={} cycle={} legs={}",
-            config.getId(), config.getExchange(), cycle, legs.size());
+                config.getId(), config.getExchange(), cycle, legs.size());
 
         if (broker.openOrderCount() >= maxOpenOrders) {
             log.warn("[MANUAL] Rejected — open order limit reached ({})", maxOpenOrders);
@@ -297,30 +341,32 @@ public class AutoTrader {
         };
 
         log.info("[MANUAL] Computed edge — cycle={} notional={} edge={}",
-            cycleEnum, String.format("%.2f", notional), String.format("%.5f", edge));
+                cycleEnum, String.format("%.2f", notional), String.format("%.5f", edge));
 
         var v = validatePreExecution(exchange, config, cycle, notional, edge);
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
                 case REJECTED_BALANCE -> log.warn("[MANUAL] Rejected — insufficient balance for triangle={} cycle={}",
-                    config.getId(), cycle);
-                case REJECTED_RISK    -> log.warn("[MANUAL] Rejected — risk check failed: {}", v.reason());
-                case REJECTED_PROFIT  -> log.warn("[MANUAL] Rejected — profit threshold not met: {}", v.reason());
+                        config.getId(), cycle);
+                case REJECTED_RISK -> log.warn("[MANUAL] Rejected — risk check failed: {}", v.reason());
+                case REJECTED_PROFIT -> log.warn("[MANUAL] Rejected — profit threshold not met: {}", v.reason());
             }
             return new ManualTradeResult(-1, v.rejectionStatus(), 0.0);
         }
 
-        if (!broker.isSimulation()) { executing = true; }
+        if (!broker.isSimulation()) {
+            executing = true;
+        }
 
         log.info("[MANUAL] Placing orders — triangle={} cycle={} notional={} edge={}",
-            config.getId(), cycle, String.format("%.2f", notional), String.format("%.5f", edge));
+                config.getId(), cycle, String.format("%.2f", notional), String.format("%.5f", edge));
         var start = System.currentTimeMillis();
         List<LegResult> legResults;
         if (broker.isSimulation()) {
             legResults = legs.stream()
-                .map(l -> new LegResult(l.legIndex(), l.pair(), l.direction(),
-                    l.price(), l.volume(), true, null))
-                .toList();
+                    .map(l -> new LegResult(l.legIndex(), l.pair(), l.direction(),
+                            l.price(), l.volume(), true, null))
+                    .toList();
         } else {
             legResults = broker.placeOrderLegs(legs);
         }
@@ -337,20 +383,29 @@ public class AutoTrader {
         return new ManualTradeResult(trade.getId(), trade.getStatus(), estimatedPnl);
     }
 
-    public record ManualTradeResult(long tradeId, String status, double pnl) {}
+    public record ManualTradeResult(long tradeId, String status, double pnl) {
+    }
 
     // -------------------------------------------------------------------------
     // Shared helpers
     // -------------------------------------------------------------------------
 
     private record ValidationResult(boolean allowed, String rejectionStatus, String reason) {
-        static ValidationResult ok() { return new ValidationResult(true, null, null); }
-        static ValidationResult reject(String status, String reason) { return new ValidationResult(false, status, reason); }
+        static ValidationResult ok() {
+            return new ValidationResult(true, null, null);
+        }
+
+        static ValidationResult reject(String status, String reason) {
+            return new ValidationResult(false, status, reason);
+        }
     }
 
-    /** Validates balance, risk limits, and profit threshold. Does not log — callers log with their own prefix. */
+    /**
+     * Validates balance, risk limits, and profit threshold. Does not log — callers
+     * log with their own prefix.
+     */
     private ValidationResult validatePreExecution(Exchange exchange, TriangleConfig config,
-                                                   String cycle, double minVolume, double profit) {
+            String cycle, double minVolume, double profit) {
         if (!hasBalanceForAllLegs(exchange, config, cycle, minVolume))
             return ValidationResult.reject(REJECTED_BALANCE, null);
 
@@ -359,17 +414,20 @@ public class AutoTrader {
             return ValidationResult.reject(REJECTED_RISK, riskResult.reason());
 
         var profitResult = risk.checkProfit(
-            config.getMinProfitPercent(), config.getMinProfitUsd(), profit, profit * minVolume);
+                config.getMinProfitPercent(), config.getMinProfitUsd(), profit, profit * minVolume);
         if (!profitResult.allowed())
             return ValidationResult.reject(REJECTED_PROFIT, profitResult.reason());
 
         return ValidationResult.ok();
     }
 
-    /** Persists the trade, updates stats, optionally sends an alert, and broadcasts. Returns the saved trade. */
+    /**
+     * Persists the trade, updates stats, optionally sends an alert, and broadcasts.
+     * Returns the saved trade.
+     */
     private Trade finalizeExecution(Signal signal, List<LegResult> legResults,
-                                     long latencyMs, double estimatedPnl, boolean filled,
-                                     String logPrefix, boolean sendAlert) {
+            long latencyMs, double estimatedPnl, boolean filled,
+            String logPrefix, boolean sendAlert) {
         executing = false;
         lastTradeCompletedMs = System.currentTimeMillis();
 
@@ -381,35 +439,36 @@ public class AutoTrader {
         if (filled) {
             executed++;
             triangleConfigRepo.incrementStats(signal.config().getId(), estimatedPnl);
-            if (sendAlert) alerts.tradeFilled(signal, estimatedPnl);
+            if (sendAlert)
+                alerts.tradeFilled(signal, estimatedPnl);
             log.info("[{}] Trade filled — tradeId={} pnl={} latencyMs={}",
-                logPrefix, trade.getId(), String.format("%.2f", estimatedPnl), latencyMs);
+                    logPrefix, trade.getId(), String.format("%.2f", estimatedPnl), latencyMs);
         } else {
             missed++;
             log.warn("[{}] Trade not fully filled — tradeId={} status={}",
-                logPrefix, trade.getId(), trade.getStatus());
+                    logPrefix, trade.getId(), trade.getStatus());
         }
 
         return trade;
     }
 
     private boolean hasBalanceForAllLegs(Exchange exchange, TriangleConfig config,
-                                          String cycle, double orderSize) {
-        var pairs = new String[]{ config.getPair1(), config.getPair2(), config.getPair3() };
-        var dirs  = Cycle.valueOf(cycle).dirs;
+            String cycle, double orderSize) {
+        var pairs = new String[] { config.getPair1(), config.getPair2(), config.getPair3() };
+        var dirs = Cycle.valueOf(cycle).dirs;
 
         var snapshots = arbitrageEngine.currentSnapshots();
 
         for (int i = 0; i < 3; i++) {
-            var pair  = pairs[i];
+            var pair = pairs[i];
             var isBuy = BUY.equals(dirs[i]);
-            var ccy   = isBuy ? pair.substring(3) : pair.substring(0, 3);
+            var ccy = isBuy ? pair.substring(3) : pair.substring(0, 3);
 
             var price = snapshots.stream()
-                .filter(p -> exchange.name().equals(p.exchange()) && pair.equals(p.pair()))
-                .findFirst()
-                .map(snap -> isBuy ? snap.ask() : snap.bid())
-                .orElse(0.0);
+                    .filter(p -> exchange.name().equals(p.exchange()) && pair.equals(p.pair()))
+                    .findFirst()
+                    .map(snap -> isBuy ? snap.ask() : snap.bid())
+                    .orElse(0.0);
 
             if (price == 0.0) {
                 log.warn("[ARB] Balance check — no snapshot for pair={} exchange={}", pair, exchange);
@@ -420,8 +479,8 @@ public class AutoTrader {
 
             if (!positions.hasAvailableBalance(exchange, ccy, required)) {
                 log.debug("[ARB] Balance check — {} {} required={} available={}",
-                    exchange, ccy, String.format("%.2f", required),
-                    String.format("%.2f", positions.getAvailableAmount(exchange, ccy)));
+                        exchange, ccy, String.format("%.2f", required),
+                        String.format("%.2f", positions.getAvailableAmount(exchange, ccy)));
                 return false;
             }
         }
@@ -429,38 +488,54 @@ public class AutoTrader {
     }
 
     private Trade buildTrade(Signal signal, List<LegResult> legResults,
-                             long latencyMs, double estimatedPnl, boolean filled) {
+            long latencyMs, double estimatedPnl, boolean filled) {
         var trade = new Trade()
-            .setTime(LocalDateTime.now())
-            .setDirection(signal.cycle().name())
-            .setSpread(signal.profit())
-            .setPnl(estimatedPnl)
-            .setStatus(broker.isSimulation() ? SIMULATION : filled ? FILLED : CANCELLED)
-            .setLatencyMs(latencyMs);
+                .setTime(LocalDateTime.now())
+                .setDirection(signal.cycle().name())
+                .setSpread(signal.profit())
+                .setPnl(estimatedPnl)
+                .setStatus(broker.isSimulation() ? SIMULATION : filled ? FILLED : CANCELLED)
+                .setLatencyMs(latencyMs);
 
         legResults.forEach(lr -> {
             log.info("[TRADE] Leg {} — {} {} price={} volume={} status={} orderId={}",
-                lr.legIndex(), lr.direction(), lr.pair(),
-                lr.price(), String.format("%.6f", lr.volume()),
-                broker.isSimulation() ? SIMULATED : lr.filled() ? FILLED : FAILED,
-                lr.orderId() != null ? lr.orderId() : "-");
+                    lr.legIndex(), lr.direction(), lr.pair(),
+                    lr.price(), String.format("%.6f", lr.volume()),
+                    broker.isSimulation() ? SIMULATED : lr.filled() ? FILLED : FAILED,
+                    lr.orderId() != null ? lr.orderId() : "-");
             trade.addLeg(new TradeLeg()
-                .setLegIndex(lr.legIndex())
-                .setPair(lr.pair())
-                .setDirection(lr.direction())
-                .setPrice(lr.price())
-                .setVolume(lr.volume())
-                .setStatus(broker.isSimulation() ? SIMULATED : lr.filled() ? FILLED : FAILED)
-                .setOrderId(lr.orderId()));
+                    .setLegIndex(lr.legIndex())
+                    .setPair(lr.pair())
+                    .setDirection(lr.direction())
+                    .setPrice(lr.price())
+                    .setVolume(lr.volume())
+                    .setStatus(broker.isSimulation() ? SIMULATED : lr.filled() ? FILLED : FAILED)
+                    .setOrderId(lr.orderId()));
         });
         log.info("[TRADE] Built — cycle={} spread={} pnl={} status={} latencyMs={}",
-            signal.cycle(), String.format("%.5f", signal.profit()),
-            String.format("%.2f", estimatedPnl), trade.getStatus(), latencyMs);
+                signal.cycle(), String.format("%.5f", signal.profit()),
+                String.format("%.2f", estimatedPnl), trade.getStatus(), latencyMs);
         return trade;
     }
 
     private double min3(double a, double b, double c) {
         return DoubleStream.of(a, b, c).min().orElse(0);
+    }
+
+    private double computePnlFromLegs(List<OrderLeg> legs, double initialAmount) {
+        var amount = initialAmount;
+        for (var leg : legs) {
+            amount = SELL.equals(leg.direction()) ? amount * leg.price() : amount / leg.price();
+        }
+        return amount - initialAmount;
+    }
+
+    private double computePnlFromResults(List<LegResult> results, double initialAmount) {
+        var amount = initialAmount;
+        for (var result : results) {
+            amount = SELL.equals(result.direction()) ? amount * result.price() : amount / result.price();
+        }
+        return amount - initialAmount;
     }
 
     // -------------------------------------------------------------------------
@@ -472,10 +547,12 @@ public class AutoTrader {
      *
      * @param detected number of signals that exceeded the edge threshold
      * @param executed number of trades where all legs were filled
-     * @param missed   number of cycles aborted due to balance, risk, or order failure
+     * @param missed   number of cycles aborted due to balance, risk, or order
+     *                 failure
      * @param avgEdge  mean profit edge across all detected signals
      */
-    public record ArbitrageStats(long detected, long executed, long missed, double avgEdge) {}
+    public record ArbitrageStats(long detected, long executed, long missed, double avgEdge) {
+    }
 
     public ArbitrageStats getStats() {
         return new ArbitrageStats(detected, executed, missed, detected > 0 ? totalEdge / detected : 0.0);
