@@ -195,46 +195,21 @@ public class AutoTrader {
 
         var legs = switch (s.cycle()) {
             case BBS -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
-                            orderSize / (currencyRateFeed.getRate(pairs[0].substring(0, 3)))
-                                    * currencyRateFeed.getRate(pairs[0].substring(0, 3))
-                                    / currencyRateFeed.getRate(pairs[0].substring(3))),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(),
-                            orderSize / (currencyRateFeed.getRate(pairs[1].substring(0, 3)))),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
-                            orderSize / (currencyRateFeed.getRate(pairs[2].substring(0, 3)))
-                                    * currencyRateFeed.getRate(pairs[2].substring(0, 3))
-                                    / currencyRateFeed.getRate(pairs[2].substring(3))));
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), orderSize / quoteRate(pairs[1])),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
             case BSS -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
-                            orderSize / (currencyRateFeed.getRate(pairs[0].substring(0, 3)))
-                                    * currencyRateFeed.getRate(pairs[0].substring(0, 3))
-                                    / currencyRateFeed.getRate(pairs[0].substring(3))),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(),
-                            orderSize / (currencyRateFeed.getRate(pairs[1].substring(0, 3)))),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
-                            orderSize / (currencyRateFeed.getRate(pairs[2].substring(0, 3)))
-                                    * currencyRateFeed.getRate(pairs[2].substring(0, 3))));
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), orderSize / baseRate(pairs[1])),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
             case BSB -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(),
-                            orderSize / (currencyRateFeed.getRate(pairs[0].substring(0, 3)))
-                                    * currencyRateFeed.getRate(pairs[0].substring(0, 3))
-                                    / currencyRateFeed.getRate(pairs[0].substring(3))),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(),
-                            orderSize / (currencyRateFeed.getRate(pairs[1].substring(0, 3)))),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(),
-                            orderSize / (currencyRateFeed.getRate(pairs[2].substring(0, 3)))
-                                    * currencyRateFeed.getRate(pairs[2].substring(0, 3))
-                                    / currencyRateFeed.getRate(pairs[2].substring(3))));
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), orderSize / baseRate(pairs[1])),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(), orderSize / quoteRate(pairs[2])));
             case SBS -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(),
-                            orderSize / (currencyRateFeed.getRate(pairs[0].substring(0, 3)))),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(),
-                            orderSize / (currencyRateFeed.getRate(pairs[1].substring(0, 3)))
-                                    * currencyRateFeed.getRate(pairs[1].substring(0, 3))
-                                    / currencyRateFeed.getRate(pairs[1].substring(3))),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(),
-                            orderSize / (currencyRateFeed.getRate(pairs[2].substring(0, 3)))));
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(), orderSize / baseRate(pairs[0])),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), orderSize / quoteRate(pairs[1])),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
         };
 
         var expectedPnl = computePnlFromLegs(legs, orderSize);
@@ -289,21 +264,21 @@ public class AutoTrader {
         // levels and currency rates
         double minVolume = switch (s.cycle()) {
             case BBS -> min3(
-                    s.b1().askQty() * s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)),
-                    s.b2().askQty() * s.b2().ask() * currencyRateFeed.getRate(pairs[1].substring(3)),
-                    s.b3().bidQty() * s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)));
+                    s.b1().askQty() * s.b1().ask() * quoteRate(pairs[0]),
+                    s.b2().askQty() * s.b2().ask() * quoteRate(pairs[1]),
+                    s.b3().bidQty() * s.b3().bid() * quoteRate(pairs[2]));
             case BSS -> min3(
-                    s.b1().askQty() * s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)),
-                    s.b2().bidQty() * s.b2().bid() * currencyRateFeed.getRate(pairs[1].substring(3)),
-                    s.b3().bidQty() * s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)));
+                    s.b1().askQty() * s.b1().ask() * quoteRate(pairs[0]),
+                    s.b2().bidQty() * s.b2().bid() * quoteRate(pairs[1]),
+                    s.b3().bidQty() * s.b3().bid() * quoteRate(pairs[2]));
             case BSB -> min3(
-                    s.b1().askQty() * s.b1().ask() * currencyRateFeed.getRate(pairs[0].substring(3)),
-                    s.b2().bidQty() * s.b2().bid() * currencyRateFeed.getRate(pairs[1].substring(3)),
-                    s.b3().askQty() * s.b3().ask() * currencyRateFeed.getRate(pairs[2].substring(3)));
+                    s.b1().askQty() * s.b1().ask() * quoteRate(pairs[0]),
+                    s.b2().bidQty() * s.b2().bid() * quoteRate(pairs[1]),
+                    s.b3().askQty() * s.b3().ask() * quoteRate(pairs[2]));
             case SBS -> min3(
-                    s.b1().bidQty() * s.b1().bid() * currencyRateFeed.getRate(pairs[0].substring(3)),
-                    s.b2().askQty() * s.b2().ask() * currencyRateFeed.getRate(pairs[1].substring(3)),
-                    s.b3().bidQty() * s.b3().bid() * currencyRateFeed.getRate(pairs[2].substring(3)));
+                    s.b1().bidQty() * s.b1().bid() * quoteRate(pairs[0]),
+                    s.b2().askQty() * s.b2().ask() * quoteRate(pairs[1]),
+                    s.b3().bidQty() * s.b3().bid() * quoteRate(pairs[2]));
         };
         log.debug("[ARB] Minimum volume — volume={} (final volume={})",
                 String.format("%.2f", minVolume), String.format("%.2f", minVolume));
@@ -516,6 +491,14 @@ public class AutoTrader {
                 signal.cycle(), String.format("%.5f", signal.profit()),
                 String.format("%.2f", estimatedPnl), trade.getStatus(), latencyMs);
         return trade;
+    }
+
+    private double baseRate(String pair) {
+        return currencyRateFeed.getRate(pair.substring(0, 3));
+    }
+
+    private double quoteRate(String pair) {
+        return currencyRateFeed.getRate(pair.substring(3));
     }
 
     private double min3(double a, double b, double c) {
