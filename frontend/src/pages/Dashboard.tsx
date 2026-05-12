@@ -61,8 +61,17 @@ export default function Dashboard() {
 
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-        <Typography variant="h4">Triangular Arbitrage Dashboard</Typography>
+      <Box sx={{
+        display: 'flex',
+        alignItems: { xs: 'flex-start', sm: 'center' },
+        flexDirection: { xs: 'column', sm: 'row' },
+        justifyContent: 'space-between',
+        gap: 1,
+        mb: 1,
+      }}>
+        <Typography variant="h4" sx={{ fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
+          Triangular Arbitrage Dashboard
+        </Typography>
         <Button
           variant="contained"
           color={running ? 'error' : 'success'}
@@ -120,7 +129,7 @@ export default function Dashboard() {
         <Grid size={{ xs: 12, md: 6 }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>Scanner</Typography>
-            <Box sx={{ display: 'flex', gap: 4 }}>
+            <Box sx={{ display: 'flex', gap: { xs: 2, sm: 4 }, flexWrap: 'wrap' }}>
               {([
                 ['Detected', arb.detected],
                 ['Executed', arb.executed],
@@ -138,7 +147,7 @@ export default function Dashboard() {
         <Grid size={{ xs: 12, md: 6 }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>Execution</Typography>
-            <Box sx={{ display: 'flex', gap: 4 }}>
+            <Box sx={{ display: 'flex', gap: { xs: 2, sm: 4 }, flexWrap: 'wrap' }}>
               {([
                 ['Avg Latency', `${execution.avgLatency.toFixed(0)} ms`],
                 ['Max Latency', `${execution.maxLatency.toFixed(0)} ms`],

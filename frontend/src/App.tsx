@@ -1,4 +1,10 @@
-import { CircularProgress, Box, Button, CssBaseline, ThemeProvider, createTheme } from '@mui/material';
+import { useState } from 'react';
+import {
+  CircularProgress, Box, Button, CssBaseline, ThemeProvider, createTheme,
+  Drawer, IconButton, List, ListItemButton, ListItemText, Divider,
+  useTheme, useMediaQuery,
+} from '@mui/material';
+import MenuIcon from '@mui/icons-material/Menu';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { useDashboardSocket } from './hooks/useDashboardSocket';
 import Dashboard from './pages/Dashboard';
@@ -30,6 +36,9 @@ function NavBar() {
   const path = window.location.pathname;
   const active = PAGES.includes(path as typeof PAGES[number]) ? path : '/';
   const { logout, user } = useAuth();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const nav = (href: string, label: string) => (
     <Button
@@ -43,6 +52,19 @@ function NavBar() {
 
   const role = user?.role ?? '';
 
+  const navItems: { href: string; label: string }[] = [
+    { href: '/',                      label: 'Dashboard' },
+    { href: '/trades',                label: 'Trades' },
+    { href: '/missed-opportunities',  label: 'Missed' },
+    ...(canAccess(role, '/positions')    ? [{ href: '/positions',    label: 'Positions' }]        : []),
+    ...(canAccess(role, '/open-orders')  ? [{ href: '/open-orders',  label: 'Open Orders' }]      : []),
+    { href: '/prices',                label: 'Feeds' },
+    { href: '/currency-rates',        label: 'Currency Rates' },
+    ...(canAccess(role, '/triangles')   ? [{ href: '/triangles',    label: 'Exchange Settings' }] : []),
+    ...(canAccess(role, '/settings')    ? [{ href: '/settings',     label: 'Settings' }]          : []),
+    ...(canAccess(role, '/users')       ? [{ href: '/users',        label: 'Users' }]             : []),
+  ];
+
   return (
     <Box
       component="nav"
@@ -55,26 +77,59 @@ function NavBar() {
         borderColor: 'divider',
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1 }}>
-        {/* Left: primary navigation */}
-        {nav('/', 'Dashboard')}
-        {nav('/trades', 'Trades')}
-        {nav('/missed-opportunities', 'Missed')}
-        {canAccess(role, '/positions')   && nav('/positions',   'Positions')}
-        {canAccess(role, '/open-orders') && nav('/open-orders', 'Open Orders')}
-
-        <Box sx={{ flex: 1 }} />
-
-        {/* Right: config / data views */}
-        {nav('/prices', 'Feeds')}
-        {nav('/currency-rates', 'Currency Rates')}
-        {canAccess(role, '/triangles') && nav('/triangles', 'Exchange Settings')}
-        {canAccess(role, '/settings')  && nav('/settings',  'Settings')}
-        {canAccess(role, '/users')     && nav('/users',     'Users')}
-
-        <Box sx={{ color: 'text.secondary', fontSize: '0.8rem', mr: 1, ml: 1 }}>{user?.username}</Box>
-        <Button size="small" color="inherit" onClick={() => void logout()}>Logout</Button>
+      <Box sx={{ display: 'flex', alignItems: 'center', px: 2, py: 1 }}>
+        {isMobile ? (
+          <>
+            <IconButton size="small" edge="start" color="inherit" aria-label="open navigation"
+              onClick={() => setDrawerOpen(true)} sx={{ mr: 1 }}>
+              <MenuIcon />
+            </IconButton>
+            <Box sx={{ flex: 1 }} />
+            <Box sx={{ color: 'text.secondary', fontSize: '0.8rem', mr: 1 }}>{user?.username}</Box>
+            <Button size="small" color="inherit" onClick={() => void logout()}>Logout</Button>
+          </>
+        ) : (
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              {nav('/', 'Dashboard')}
+              {nav('/trades', 'Trades')}
+              {nav('/missed-opportunities', 'Missed')}
+              {canAccess(role, '/positions')   && nav('/positions',   'Positions')}
+              {canAccess(role, '/open-orders') && nav('/open-orders', 'Open Orders')}
+            </Box>
+            <Box sx={{ flex: 1 }} />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              {nav('/prices', 'Feeds')}
+              {nav('/currency-rates', 'Currency Rates')}
+              {canAccess(role, '/triangles') && nav('/triangles', 'Exchange Settings')}
+              {canAccess(role, '/settings')  && nav('/settings',  'Settings')}
+              {canAccess(role, '/users')     && nav('/users',     'Users')}
+              <Box sx={{ color: 'text.secondary', fontSize: '0.8rem', mr: 1, ml: 1 }}>{user?.username}</Box>
+              <Button size="small" color="inherit" onClick={() => void logout()}>Logout</Button>
+            </Box>
+          </>
+        )}
       </Box>
+
+      <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)}
+        slotProps={{ paper: { sx: { width: 240 } } }}>
+        <Box sx={{ py: 1, px: 2 }}>
+          <Box sx={{ color: 'text.secondary', fontSize: '0.85rem' }}>{user?.username}</Box>
+        </Box>
+        <Divider />
+        <List dense disablePadding>
+          {navItems.map(({ href, label }) => (
+            <ListItemButton key={href} selected={active === href}
+              onClick={() => { setDrawerOpen(false); window.location.href = href; }}>
+              <ListItemText primary={label} />
+            </ListItemButton>
+          ))}
+        </List>
+        <Divider />
+        <Box sx={{ p: 1 }}>
+          <Button fullWidth size="small" color="inherit" onClick={() => void logout()}>Logout</Button>
+        </Box>
+      </Drawer>
     </Box>
   );
 }

@@ -60,10 +60,11 @@ class AutoTraderTest {
 
     static final Signal SIGNAL_A = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.001, OB, OB, OB);
 
+    // EURJPY sell at 162.25 > ask_EURUSD*ask_USDJPY ≈ 162.021 → profitable execution
     static final List<LegResult> THREE_FILLED_LEGS = List.of(
         new LegResult(1, "EURUSD", "BUY",  1.0801, 92584.0, true,  "TXID-1"),
-        new LegResult(2, "USDJPY", "BUY",  150.01, 666.6,   true,  "TXID-2"),
-        new LegResult(3, "EURJPY", "SELL", 162.00, 617.3,   true,  "TXID-3")
+        new LegResult(2, "USDJPY", "BUY",  150.01, 617.2,   true,  "TXID-2"),
+        new LegResult(3, "EURJPY", "SELL", 162.25, 617.2,   true,  "TXID-3")
     );
 
     static final List<LegResult> ONE_FAILED_LEG = List.of(
@@ -186,7 +187,8 @@ class AutoTraderTest {
         verify(tradeRepo).save(captor.capture());
         var saved = captor.getValue();
         assertThat(saved.getStatus()).isEqualTo("FILLED");
-        assertThat(saved.getPnl()).isEqualTo(0.001 * 100_000.0, offset(0.001));
+        // pnl = computePnlFromResults: 100_000 / 1.0801 / 150.01 * 162.25 - 100_000 ≈ 140
+        assertThat(saved.getPnl()).isGreaterThan(100.0);
         assertThat(saved.getLegs()).hasSize(3);
         assertThat(saved.getLegs()).allMatch(l -> "FILLED".equals(l.getStatus()));
         assertThat(saved.getLegs().get(0).getPair()).isEqualTo("EURUSD");
@@ -561,5 +563,70 @@ class AutoTraderTest {
         autoTrader.attemptArbitrage();
 
         verify(arbitrageEngine, never()).scanForOpportunities();
+    }
+
+    // ── computeMinimumVolume / computeLegs / computePnlFromLegs ─────────────────
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void computeLegs_SBS_USDTRY_EURTRY_EURUSD_orderSize500() {
+        // FX rates: USD/TRY=45.37 → rate("TRY")=1/45.37, EUR/USD=1.18 → rate("EUR")=1.18
+        when(currencyRateFeed.getRate("USD")).thenReturn(1.0);
+        when(currencyRateFeed.getRate("EUR")).thenReturn(1.18);
+        when(currencyRateFeed.getRate("TRY")).thenReturn(1.0 / 45.37);
+
+        var triSbs = new TriangleConfig();
+        triSbs.setPair1("USDTRY");
+        triSbs.setPair2("EURTRY");
+        triSbs.setPair3("EURUSD");
+        triSbs.setExchange("KRAKEN");
+        triSbs.setCycle("SBS");
+
+        var obUsdTry = new OrderBook("USDTRY", 45.36,   500.0, 45.38, 1_000_000.0);
+        var obEurTry = new OrderBook("EURTRY", 53.55, 1_000_000.0, 54.00, 1_000_000.0);
+        var obEurUsd = new OrderBook("EURUSD",  1.20, 1_000_000.0,  1.22, 1_000_000.0);
+        var signal = new Signal(Exchange.KRAKEN, triSbs, com.ib.arb.scanner.Cycle.SBS,
+                0.432, obUsdTry, obEurTry, obEurUsd);
+
+        // ── computeMinimumVolume ──────────────────────────────────────────────
+        // SBS: min3(bidQty(USDTRY)*bid*rate(TRY), askQty(EURTRY)*ask*rate(TRY), bidQty(EURUSD)*bid*rate(USD))
+        //    = min3(500*45.36*(1/45.37), 1M*54*(1/45.37), 1M*1.20*1.0)
+        //    = min3(22680/45.37, ...) ≈ min3(499.89, 1_190_167, 1_200_000) → 499.89 (bottleneck: USDTRY bid qty)
+        var liquidityCap = autoTrader.computeMinimumVolume(signal);
+        assertThat(liquidityCap).isCloseTo(499.89, offset(0.01));
+
+        // ── computeLegs ───────────────────────────────────────────────────────
+        // volumes: USDTRY=500/rate(USD)=500, EURTRY=500/rate(TRY)=500*45.37=22685, EURUSD=500/rate(EUR)=500/1.18≈423.73
+        var legs = (List<com.ib.arb.broker.OrderLeg>)
+                ReflectionTestUtils.invokeMethod(autoTrader, "computeLegs", signal, 500.0);
+
+        assertThat(legs).hasSize(3);
+
+        var leg1 = legs.get(0);
+        assertThat(leg1.legIndex()).isEqualTo(1);
+        assertThat(leg1.pair()).isEqualTo("USDTRY");
+        assertThat(leg1.direction()).isEqualTo("SELL");
+        assertThat(leg1.price()).isEqualTo(45.36);
+        assertThat(leg1.volume()).isEqualTo(500.0);          // 500 / rate("USD")=1.0
+
+        var leg2 = legs.get(1);
+        assertThat(leg2.legIndex()).isEqualTo(2);
+        assertThat(leg2.pair()).isEqualTo("EURTRY");
+        assertThat(leg2.direction()).isEqualTo("BUY");
+        assertThat(leg2.price()).isEqualTo(54.00);
+        assertThat(leg2.volume()).isCloseTo(22685.0, offset(0.01)); // 500 / rate("TRY")=500*45.37
+
+        var leg3 = legs.get(2);
+        assertThat(leg3.legIndex()).isEqualTo(3);
+        assertThat(leg3.pair()).isEqualTo("EURUSD");
+        assertThat(leg3.direction()).isEqualTo("SELL");
+        assertThat(leg3.price()).isEqualTo(1.20);
+        assertThat(leg3.volume()).isCloseTo(423.73, offset(0.01)); // 500 / rate("EUR")=500/1.18
+
+        // ── computePnlFromLegs ────────────────────────────────────────────────
+        // 500 USD → ×45.36 → 22680 TRY → ÷54.00 → 420 EUR → ×1.20 → 504 USD
+        // PnL = 504 - 500 = 4.0 USD
+        var pnl = (Double) ReflectionTestUtils.invokeMethod(autoTrader, "computePnlFromLegs", legs, 500.0);
+        assertThat(pnl).isEqualTo(4.0, offset(0.001));
     }
 }

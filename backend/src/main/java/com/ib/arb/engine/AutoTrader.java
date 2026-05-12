@@ -164,8 +164,11 @@ public class AutoTrader {
 
         var orderSize = Math.min(liquidityCap, balanceCap);
 
-        // TODO: change checks
-        var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), orderSize, s.profit());
+        var legs = computeLegs(s, orderSize);
+
+        var expectedPnl = computePnlFromLegs(legs, orderSize);
+
+        var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), orderSize, s.profit(), expectedPnl);
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
                 case REJECTED_BALANCE -> log.warn("[ARB] Missed — insufficient balance for triangle={} cycle={}",
@@ -186,50 +189,6 @@ public class AutoTrader {
                     .setRejection(v.rejectionStatus())
                     .setReason(v.reason()));
             missed++;
-            return;
-        }
-
-        if (!broker.isSimulation()) {
-            executing = true;
-        }
-
-        var legs = switch (s.cycle()) {
-            case BBS -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), orderSize / quoteRate(pairs[1])),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
-            case BSS -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), orderSize / baseRate(pairs[1])),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
-            case BSB -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), orderSize / baseRate(pairs[1])),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(), orderSize / quoteRate(pairs[2])));
-            case SBS -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(), orderSize / baseRate(pairs[0])),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), orderSize / quoteRate(pairs[1])),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
-        };
-
-        var expectedPnl = computePnlFromLegs(legs, orderSize);
-        if (expectedPnl < s.config().getMinProfitUsd()) {
-            log.warn("[ARB] Missed — expected leg P&L ${} below minimum ${}",
-                    String.format("%.2f", expectedPnl), String.format("%.2f", s.config().getMinProfitUsd()));
-            missedOpportunityRepo.save(new MissedOpportunity()
-                    .setTime(LocalDateTime.now())
-                    .setTriangleId(s.config().getId())
-                    .setExchange(s.exchange().name())
-                    .setPair1(s.config().getPair1())
-                    .setPair2(s.config().getPair2())
-                    .setPair3(s.config().getPair3())
-                    .setCycle(s.cycle().name())
-                    .setEdge(s.profit())
-                    .setOrderSize(orderSize)
-                    .setRejection(REJECTED_PROFIT)
-                    .setReason(String.format("leg P&L $%.2f < min $%.2f", expectedPnl, s.config().getMinProfitUsd())));
-            missed++;
-            executing = false;
             return;
         }
 
@@ -258,7 +217,7 @@ public class AutoTrader {
         finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true);
     }
 
-    private double computeMinimumVolume(Signal s) {
+    public double computeMinimumVolume(Signal s) {
         var pairs = new String[] { s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
         // compute the minimum volume in USD across all three legs, based on price
         // levels and currency rates
@@ -318,7 +277,8 @@ public class AutoTrader {
         log.info("[MANUAL] Computed edge — cycle={} notional={} edge={}",
                 cycleEnum, String.format("%.2f", notional), String.format("%.5f", edge));
 
-        var v = validatePreExecution(exchange, config, cycle, notional, edge);
+        var manualExpectedPnl = computePnlFromLegs(legs, notional);
+        var v = validatePreExecution(exchange, config, cycle, notional, edge, manualExpectedPnl);
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
                 case REJECTED_BALANCE -> log.warn("[MANUAL] Rejected — insufficient balance for triangle={} cycle={}",
@@ -379,8 +339,8 @@ public class AutoTrader {
      * Validates balance, risk limits, and profit threshold. Does not log — callers
      * log with their own prefix.
      */
-    private ValidationResult validatePreExecution(Exchange exchange, TriangleConfig config,
-            String cycle, double minVolume, double profit) {
+    public ValidationResult validatePreExecution(Exchange exchange, TriangleConfig config,
+            String cycle, double minVolume, double profit, double estimatedPnlUsd) {
         if (!hasBalanceForAllLegs(exchange, config, cycle, minVolume))
             return ValidationResult.reject(REJECTED_BALANCE, null);
 
@@ -389,7 +349,7 @@ public class AutoTrader {
             return ValidationResult.reject(REJECTED_RISK, riskResult.reason());
 
         var profitResult = risk.checkProfit(
-                config.getMinProfitPercent(), config.getMinProfitUsd(), profit, profit * minVolume);
+                config.getMinProfitPercent(), config.getMinProfitUsd(), profit, estimatedPnlUsd);
         if (!profitResult.allowed())
             return ValidationResult.reject(REJECTED_PROFIT, profitResult.reason());
 
@@ -427,7 +387,7 @@ public class AutoTrader {
         return trade;
     }
 
-    private boolean hasBalanceForAllLegs(Exchange exchange, TriangleConfig config,
+    public boolean hasBalanceForAllLegs(Exchange exchange, TriangleConfig config,
             String cycle, double orderSize) {
         var pairs = new String[] { config.getPair1(), config.getPair2(), config.getPair3() };
         var dirs = Cycle.valueOf(cycle).dirs;
@@ -491,6 +451,29 @@ public class AutoTrader {
                 signal.cycle(), String.format("%.5f", signal.profit()),
                 String.format("%.2f", estimatedPnl), trade.getStatus(), latencyMs);
         return trade;
+    }
+
+    public List<OrderLeg> computeLegs(Signal s, double orderSize) {
+        var pairs = new String[] { s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
+        var dirs = s.cycle().dirs;
+        return switch (s.cycle()) {
+            case BBS -> List.of(
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), orderSize / quoteRate(pairs[1])),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
+            case BSS -> List.of(
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), orderSize / baseRate(pairs[1])),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
+            case BSB -> List.of(
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), orderSize / baseRate(pairs[1])),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(), orderSize / quoteRate(pairs[2])));
+            case SBS -> List.of(
+                    new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(), orderSize / baseRate(pairs[0])),
+                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), orderSize / quoteRate(pairs[1])),
+                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
+        };
     }
 
     private double baseRate(String pair) {

@@ -89,7 +89,7 @@ class ArbitrageEngineTest {
 
     @Test
     void scan_returnsEmpty_whenEdgeBelowThreshold() {
-        // edgeA = 1.08 * 150 - 162.001 = -0.001 < threshold
+        // edgeA = bid(EURJPY) - ask(EURUSD)*ask(USDJPY) = 162.001 - 1.0801*150.01 ≈ -0.020 < threshold
         var feed = feedWith(
             "EURUSD", 1.0800, 1.0801,
             "USDJPY", 150.00, 150.01,
@@ -98,15 +98,37 @@ class ArbitrageEngineTest {
         assertThat(engine(feed).scanForOpportunities()).isEmpty();
     }
 
+    @Test
+    void scan_detectsCycleD_SBS_USDTRY_EURTRY_EURUSD() {
+        // edgeD = bid(USDTRY) * bid(EURUSD) - ask(EURTRY) = 45.36 * 1.20 - 54.00 = 0.432 > 0.0001
+        var tri = cfg("USDTRY", "EURTRY", "EURUSD", "SBS");
+        tri.setMinProfitPercent(0.0001);
+        var repo = mock(TriangleConfigRepository.class);
+        when(repo.findByStatus("ACTIVE")).thenReturn(List.of(tri));
+        when(repo.findAll()).thenReturn(List.of(tri));
+
+        var feed = mock(OrderBookFeed.class);
+        when(feed.getExchange()).thenReturn(Exchange.KRAKEN);
+        when(feed.getSnapshot("USDTRY")).thenReturn(new OrderBook("USDTRY", 45.36,   500.0, 45.38, 1_000_000.0));
+        when(feed.getSnapshot("EURTRY")).thenReturn(new OrderBook("EURTRY", 53.55, 1_000_000.0, 54.00, 1_000_000.0));
+        when(feed.getSnapshot("EURUSD")).thenReturn(new OrderBook("EURUSD",  1.20, 1_000_000.0,  1.22, 1_000_000.0));
+        var signal = engine(repo, feed).scanForOpportunities();
+
+        assertThat(signal).isPresent();
+        assertThat(signal.get().cycle()).isEqualTo(Cycle.SBS);
+        assertThat(signal.get().profit()).isGreaterThan(0.0001);
+        assertThat(signal.get().exchange()).isEqualTo(Exchange.KRAKEN);
+    }
+
     // ── cycle A ───────────────────────────────────────────────────────────────
 
     @Test
     void scan_detectsCycleA_whenBidProductExceedsAsk3() {
-        // edgeA = bid(EURUSD) * bid(USDJPY) - ask(EURJPY) = 1.08 * 150 - 161.90 = 0.10
+        // edgeA = bid(EURJPY) - ask(EURUSD)*ask(USDJPY) = 162.10 - 1.0801*150.01 ≈ 0.079 > threshold
         var feed = feedWith(
             "EURUSD", 1.0800, 1.0801,
             "USDJPY", 150.00, 150.01,
-            "EURJPY", 161.50, 161.90   // bid < ask (valid); ask=161.90 < 162.0 → Cycle A fires
+            "EURJPY", 162.10, 162.20   // bid=162.10 > ask1*ask2=162.021 → Cycle A fires
         );
         var signal = engine(feed).scanForOpportunities();
 
@@ -120,15 +142,15 @@ class ArbitrageEngineTest {
 
     @Test
     void scan_detectsCycleB_whenBid1ExceedsAsk2xAsk3() {
-        // edgeB = bid_EURUSD − ask_EURGBP × ask_GBPUSD = 1.090 − 0.861×1.261 ≈ 0.004 > threshold
+        // edgeB = bid_EURGBP * bid_GBPUSD − ask_EURUSD = 0.870*1.260 − 1.081 ≈ 0.015 > threshold
         var tri = cfg("EURUSD", "EURGBP", "GBPUSD", "BSS");
         var repo = mock(TriangleConfigRepository.class);
         when(repo.findByStatus("ACTIVE")).thenReturn(List.of(tri));
         when(repo.findAll()).thenReturn(List.of(tri));
 
         var feed = feedWith(
-            "EURUSD", 1.090, 1.091,
-            "EURGBP", 0.860, 0.861,
+            "EURUSD", 1.080, 1.081,
+            "EURGBP", 0.870, 0.871,
             "GBPUSD", 1.260, 1.261
         );
         var signal = engine(repo, feed).scanForOpportunities();
@@ -142,8 +164,7 @@ class ArbitrageEngineTest {
 
     @Test
     void scan_detectsCycleC_whenBid1xBid3ExceedsAsk2() {
-        // edgeC = bid_EURUSD × bid_USDCHF − ask_EURCHF = 1.08×0.905 − 0.978 = 0.9774 − 0.978 < 0
-        // use: 1.085 × 0.91 − 0.977 = 0.9874 − 0.977 = 0.010 > threshold
+        // edgeC = 1/ask_EURUSD * bid_EURCHF − ask_USDCHF = 1/1.086 * 0.995 − 0.911 ≈ 0.005 > threshold
         var tri = cfg("EURUSD", "EURCHF", "USDCHF", "BSB");
         var repo = mock(TriangleConfigRepository.class);
         when(repo.findByStatus("ACTIVE")).thenReturn(List.of(tri));
@@ -151,7 +172,7 @@ class ArbitrageEngineTest {
 
         var feed = feedWith(
             "EURUSD", 1.085, 1.086,
-            "EURCHF", 0.977, 0.978,
+            "EURCHF", 0.995, 0.996,   // bid=0.995 > ask1*ask3 = 1.086*0.911 ≈ 0.989
             "USDCHF", 0.910, 0.911
         );
         var signal = engine(repo, feed).scanForOpportunities();
@@ -165,7 +186,7 @@ class ArbitrageEngineTest {
 
     @Test
     void scan_detectsCycleD_whenBid2ExceedsAsk1xAsk3() {
-        // edgeD = bid_EURCHF − ask_USDCHF × ask_EURUSD = 0.979 − 0.911×1.073 = 0.979 − 0.978 = 0.001 > threshold
+        // edgeD = bid_USDCHF * bid_EURUSD − ask_EURCHF = 0.910*1.080 − 0.978 ≈ 0.005 > threshold
         var tri = cfg("USDCHF", "EURCHF", "EURUSD", "SBS");
         var repo = mock(TriangleConfigRepository.class);
         when(repo.findByStatus("ACTIVE")).thenReturn(List.of(tri));
@@ -173,8 +194,8 @@ class ArbitrageEngineTest {
 
         var feed = feedWith(
             "USDCHF", 0.910, 0.911,
-            "EURCHF", 0.979, 0.980,
-            "EURUSD", 1.072, 1.073
+            "EURCHF", 0.977, 0.978,
+            "EURUSD", 1.080, 1.081   // bid=1.080 → 0.910*1.080=0.9828 > ask_EURCHF=0.978
         );
         var signal = engine(repo, feed).scanForOpportunities();
 
@@ -187,16 +208,16 @@ class ArbitrageEngineTest {
 
     @Test
     void scan_returnsBestSignal_acrossMultipleFeeds() {
-        // feed1: small edge ≈ 0.001, feed2: large edge ≈ 0.1
+        // feed1: small edge, feed2: larger edge — engine must return feed2's signal
         var feed1 = feedWith(
             "EURUSD", 1.0800, 1.0801,
             "USDJPY", 150.00, 150.01,
-            "EURJPY", 161.50, 161.999  // edgeA = 162.0 - 161.999 ≈ 0.001
+            "EURJPY", 162.025, 162.03  // edgeA = 162.025 - 162.021 ≈ 0.004
         );
         var feed2 = feedWith(
             "EURUSD", 1.0800, 1.0801,
             "USDJPY", 150.00, 150.01,
-            "EURJPY", 161.50, 161.90   // edgeA = 162.0 - 161.90 ≈ 0.1
+            "EURJPY", 162.15, 162.20   // edgeA = 162.15 - 162.021 ≈ 0.129
         );
         when(feed2.getExchange()).thenReturn(Exchange.KRAKEN);
 
@@ -229,21 +250,21 @@ class ArbitrageEngineTest {
 
     @Test
     void scan_usesPerTriangleMinProfitPercent() {
-        // edge = 1.08 * 150 - 161.90 = 0.10
+        // edge = bid(EURJPY) - ask(EURUSD)*ask(USDJPY) = 162.10 - 162.021 ≈ 0.079
         var feed = feedWith(
             "EURUSD", 1.0800, 1.0801,
             "USDJPY", 150.00, 150.01,
-            "EURJPY", 161.50, 161.90
+            "EURJPY", 162.10, 162.20
         );
 
         var highThreshold = cfg("EURUSD", "USDJPY", "EURJPY");
-        highThreshold.setMinProfitPercent(0.5);  // edge 0.10 < 0.5 → no signal
+        highThreshold.setMinProfitPercent(0.5);  // edge 0.079 < 0.5 → no signal
         var repoHigh = mock(TriangleConfigRepository.class);
         when(repoHigh.findByStatus("ACTIVE")).thenReturn(List.of(highThreshold));
         assertThat(engine(repoHigh, feed).scanForOpportunities()).isEmpty();
 
         var lowThreshold = cfg("EURUSD", "USDJPY", "EURJPY");
-        lowThreshold.setMinProfitPercent(0.00001);  // edge 0.10 > 0.00001 → signal
+        lowThreshold.setMinProfitPercent(0.00001);  // edge 0.079 > 0.00001 → signal
         var repoLow = mock(TriangleConfigRepository.class);
         when(repoLow.findByStatus("ACTIVE")).thenReturn(List.of(lowThreshold));
         assertThat(engine(repoLow, feed).scanForOpportunities()).isPresent();
@@ -254,7 +275,7 @@ class ArbitrageEngineTest {
         var feed = feedWith(
             "EURUSD", 1.0800, 1.0801,
             "USDJPY", 150.00, 150.01,
-            "EURJPY", 161.50, 161.90
+            "EURJPY", 162.10, 162.20
         );
         var signal = engine(feed).scanForOpportunities();
 

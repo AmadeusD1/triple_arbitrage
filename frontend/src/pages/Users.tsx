@@ -61,7 +61,7 @@ export default function Users() {
   };
 
   return (
-    <Box sx={{ p: 3, maxWidth: 600 }}>
+    <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 600, width: '100%' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h5">Users</Typography>
         <Button variant="contained" size="small" onClick={() => setCreateOpen((v) => !v)}>

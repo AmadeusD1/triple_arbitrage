@@ -21,13 +21,13 @@ export default function OpenOrders() {
       <Typography variant="h5" sx={{ mb: 2 }}>Open Orders</Typography>
       <Paper>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ minWidth: 340 }}>
             <TableHead>
               <TableRow>
-                <TableCell>Order ID</TableCell>
+                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Order ID</TableCell>
                 <TableCell>Pair</TableCell>
                 <TableCell>Side</TableCell>
-                <TableCell>Type</TableCell>
+                <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Type</TableCell>
                 <TableCell align="right">Price</TableCell>
                 <TableCell align="right">Volume</TableCell>
                 <TableCell align="right">Filled</TableCell>
@@ -37,7 +37,7 @@ export default function OpenOrders() {
             <TableBody>
               {orders.map((o) => (
                 <TableRow key={o.txid}>
-                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'text.secondary' }}>
+                  <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'text.secondary', display: { xs: 'none', md: 'table-cell' } }}>
                     {o.txid}
                   </TableCell>
                   <TableCell>{o.pair}</TableCell>
@@ -45,7 +45,7 @@ export default function OpenOrders() {
                     <Chip label={o.side.toUpperCase()} size="small" variant="outlined"
                       color={o.side === 'buy' ? 'success' : 'warning'} />
                   </TableCell>
-                  <TableCell>{o.orderType}</TableCell>
+                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{o.orderType}</TableCell>
                   <TableCell align="right">{o.price.toFixed(5)}</TableCell>
                   <TableCell align="right">{o.volume.toFixed(4)}</TableCell>
                   <TableCell align="right">{o.volumeFilled.toFixed(4)}</TableCell>

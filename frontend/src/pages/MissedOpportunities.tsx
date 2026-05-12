@@ -38,13 +38,13 @@ export default function MissedOpportunities({ rows }: Props) {
 
       <Paper>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ minWidth: 560 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Time</TableCell>
-                <TableCell>Exchange</TableCell>
+                <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Exchange</TableCell>
                 <TableCell>Pairs</TableCell>
-                <TableCell>Cycle</TableCell>
+                <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Cycle</TableCell>
                 <TableCell align="right">Edge</TableCell>
                 <TableCell align="right">Order Size</TableCell>
                 <TableCell align="center">Rejection</TableCell>
@@ -57,11 +57,11 @@ export default function MissedOpportunities({ rows }: Props) {
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>
                     {new Date(r.time + 'Z').toLocaleString()}
                   </TableCell>
-                  <TableCell>{r.exchange}</TableCell>
+                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{r.exchange}</TableCell>
                   <TableCell>
                     <Chip label={`${r.pair1} / ${r.pair2} / ${r.pair3}`} size="small" variant="outlined" />
                   </TableCell>
-                  <TableCell>{r.cycle}</TableCell>
+                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{r.cycle}</TableCell>
                   <TableCell align="right">{r.edge.toFixed(5)}</TableCell>
                   <TableCell align="right">${r.orderSize.toFixed(2)}</TableCell>
                   <TableCell align="center">{rejectionChip(r.rejection)}</TableCell>

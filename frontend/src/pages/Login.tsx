@@ -25,8 +25,8 @@ export default function Login() {
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <Card sx={{ width: 360 }}>
-        <CardContent sx={{ p: 4 }}>
+      <Card sx={{ width: { xs: '92%', sm: 360 }, mx: 'auto' }}>
+        <CardContent sx={{ p: { xs: 2, sm: 4 } }}>
           <Typography variant="h5" gutterBottom>Sign in</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
             Triangular Arbitrage Dashboard

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +37,9 @@ public class CurrencyRateFeed {
     @Value("${currency.feed-url:ws://localhost:7070/api/ws/global}")
     private String feedUrl;
 
+    @Autowired
+    private CurrencyLayerService currencyLayerService;
+
     private final Map<String, Double> rates = new ConcurrentHashMap<>();
     private volatile boolean connected = false;
 
@@ -54,6 +58,8 @@ public class CurrencyRateFeed {
      *  to {@code 1 / USD/CCY} if only the inverse pair is published. */
     public double getRate(String isoCurrency) {
         if ("USD".equals(isoCurrency)) return 1.0;
+        var layerRate = currencyLayerService.getRate(isoCurrency);
+        if (layerRate > 0.0) return layerRate;
         var direct = rates.get(isoCurrency + "/USD");
         if (direct != null) return direct;
         var inverse = rates.get("USD/" + isoCurrency);

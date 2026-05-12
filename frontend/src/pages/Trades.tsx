@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   Box, Button, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
   IconButton, Paper, Table, TableBody, TableCell, TableContainer, TableHead,
-  TablePagination, TableRow, Typography,
+  TablePagination, TableRow, Typography, useTheme, useMediaQuery,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { getTrade, getTrades, deleteSimulationTrades } from '../api/rest';
@@ -15,6 +15,8 @@ const LEG_STATUS_COLOR: Record<LegStatus, 'success' | 'error' | 'default'> = {
 };
 
 function TradeDetailDialog({ tradeId, onClose }: { tradeId: number | null; onClose: () => void }) {
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const [detail, setDetail] = useState<TradeDetail | null>(null);
 
   useEffect(() => {
@@ -24,7 +26,7 @@ function TradeDetailDialog({ tradeId, onClose }: { tradeId: number | null; onClo
   }, [tradeId]);
 
   return (
-    <Dialog open={tradeId != null} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog open={tradeId != null} onClose={onClose} maxWidth="md" fullWidth fullScreen={fullScreen}>
       <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         Trade #{tradeId} — Legs
         <IconButton size="small" onClick={onClose}><CloseIcon fontSize="small" /></IconButton>
@@ -106,14 +108,14 @@ export default function Trades() {
       </Box>
       <Paper>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ minWidth: 420 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Time</TableCell>
                 <TableCell>Dir</TableCell>
                 <TableCell align="right">Spread</TableCell>
                 <TableCell align="right">PnL</TableCell>
-                <TableCell align="right">Latency</TableCell>
+                <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Latency</TableCell>
                 <TableCell>Status</TableCell>
               </TableRow>
             </TableHead>
@@ -127,7 +129,7 @@ export default function Trades() {
                   <TableCell align="right" sx={{ color: t.pnl >= 0 ? 'success.main' : 'error.main' }}>
                     ${t.pnl.toFixed(2)}
                   </TableCell>
-                  <TableCell align="right">{t.latencyMs.toFixed(0)} ms</TableCell>
+                  <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{t.latencyMs.toFixed(0)} ms</TableCell>
                   <TableCell>
                     <Chip label={t.status}
                       color={t.status === 'FILLED' ? 'success' : t.status === 'SIMULATION' ? 'info' : 'default'}

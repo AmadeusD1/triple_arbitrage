@@ -26,7 +26,7 @@ export default function Positions() {
               <TableRow>
                 <TableCell>Exchange</TableCell>
                 <TableCell>Currency</TableCell>
-                <TableCell>Kraken Key</TableCell>
+                <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Kraken Key</TableCell>
                 <TableCell align="right">Balance</TableCell>
               </TableRow>
             </TableHead>
@@ -35,7 +35,7 @@ export default function Positions() {
                 <TableRow key={`${b.exchange}-${b.krakenKey}`}>
                   <TableCell>{b.exchange}</TableCell>
                   <TableCell>{b.currency}</TableCell>
-                  <TableCell sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>{b.krakenKey}</TableCell>
+                  <TableCell sx={{ color: 'text.secondary', fontFamily: 'monospace', display: { xs: 'none', sm: 'table-cell' } }}>{b.krakenKey}</TableCell>
                   <TableCell align="right">{b.amount.toFixed(4)}</TableCell>
                 </TableRow>
               ))}

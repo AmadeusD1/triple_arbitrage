@@ -3,7 +3,7 @@ import {
   Alert, Box, Button, Chip, Container, Dialog, DialogActions, DialogContent,
   DialogTitle, IconButton, Paper, Snackbar, Switch, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup,
-  Tooltip, Typography,
+  Tooltip, Typography, useTheme, useMediaQuery,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -46,6 +46,8 @@ function computeLegs(t: TriangleConfig, cycle: CycleDirection, size: number, pri
 }
 
 export default function Triangles({ prices }: Props) {
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const [triangles, setTriangles] = useState<TriangleConfig[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -125,15 +127,15 @@ export default function Triangles({ prices }: Props) {
 
       <Paper>
         <TableContainer>
-          <Table size="small">
+          <Table size="small" sx={{ minWidth: 380 }}>
             <TableHead>
               <TableRow>
-                <TableCell>Exchange</TableCell>
+                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Exchange</TableCell>
                 <TableCell>Pairs</TableCell>
                 <TableCell>Cycle</TableCell>
-                <TableCell align="right">Min %</TableCell>
+                <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Min %</TableCell>
                 <TableCell align="right">Min USD</TableCell>
-                <TableCell align="right">Hits</TableCell>
+                <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Hits</TableCell>
                 <TableCell align="right">Total PnL</TableCell>
                 <TableCell align="center">Active</TableCell>
                 <TableCell align="center">Actions</TableCell>
@@ -142,16 +144,16 @@ export default function Triangles({ prices }: Props) {
             <TableBody>
               {triangles.map((t) => (
                 <TableRow key={t.id}>
-                  <TableCell>{t.exchange}</TableCell>
+                  <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>{t.exchange}</TableCell>
                   <TableCell><Chip label={`${t.pair1} / ${t.pair2} / ${t.pair3}`} size="small" variant="outlined" /></TableCell>
                   <TableCell>
                     <Tooltip title={CYCLE_DESCRIPTIONS[t.cycle] ?? t.cycle} placement="right">
                       <Chip label={t.cycle} size="small" />
                     </Tooltip>
                   </TableCell>
-                  <TableCell align="right">{t.minProfitPercent.toFixed(5)}</TableCell>
+                  <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{t.minProfitPercent.toFixed(5)}</TableCell>
                   <TableCell align="right">${t.minProfitUsd.toFixed(2)}</TableCell>
-                  <TableCell align="right">{t.hits}</TableCell>
+                  <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{t.hits}</TableCell>
                   <TableCell align="right" sx={{ color: t.totalProfitUsd >= 0 ? 'success.main' : 'error.main' }}>
                     ${t.totalProfitUsd.toFixed(2)}
                   </TableCell>
@@ -190,7 +192,7 @@ export default function Triangles({ prices }: Props) {
             {textField('minProfitUsd', 'Min Profit USD', 'number')}
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>Cycle</Typography>
-              <ToggleButtonGroup value={form.cycle} exclusive size="small"
+              <ToggleButtonGroup value={form.cycle} exclusive size="small" sx={{ flexWrap: 'wrap' }}
                 onChange={(_, v) => { if (v) setForm(f => ({ ...f, cycle: v })); }}>
                 {(['BBS', 'BSS', 'BSB', 'SBS'] as const).map(c => (
                   <ToggleButton key={c} value={c} sx={{ flexDirection: 'column', px: 2, py: 0.5 }}>
@@ -209,11 +211,11 @@ export default function Triangles({ prices }: Props) {
       </Dialog>
 
       {/* Manual trade dialog */}
-      <Dialog open={tradeTarget != null} onClose={() => setTradeTarget(null)} maxWidth="sm" fullWidth>
+      <Dialog open={tradeTarget != null} onClose={() => setTradeTarget(null)} maxWidth="sm" fullWidth fullScreen={fullScreen}>
         <DialogTitle>Manual Trade — {tradeTarget?.pair1} / {tradeTarget?.pair2} / {tradeTarget?.pair3}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
-            <ToggleButtonGroup value={tradeCycle} exclusive size="small"
+            <ToggleButtonGroup value={tradeCycle} exclusive size="small" sx={{ flexWrap: 'wrap' }}
               onChange={(_, v) => { if (v) handleCycleChange(v as CycleDirection); }}>
               {(['BBS', 'BSS', 'BSB', 'SBS'] as const).map(c => (
                 <ToggleButton key={c} value={c} sx={{ flexDirection: 'column', px: 2, py: 0.5 }}>
@@ -246,12 +248,12 @@ export default function Triangles({ prices }: Props) {
                     <TableCell>
                       <TextField type="number" size="small" value={l.price}
                         onChange={(e) => updateLeg(l.legIndex, 'price', Number(e.target.value))}
-                        sx={{ width: 110 }} />
+                        sx={{ width: { xs: '100%', sm: 110 } }} />
                     </TableCell>
                     <TableCell>
                       <TextField type="number" size="small" value={l.volume.toFixed(4)}
                         onChange={(e) => updateLeg(l.legIndex, 'volume', Number(e.target.value))}
-                        sx={{ width: 110 }} />
+                        sx={{ width: { xs: '100%', sm: 110 } }} />
                     </TableCell>
                   </TableRow>
                 ))}
