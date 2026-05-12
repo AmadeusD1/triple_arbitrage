@@ -187,7 +187,14 @@ public class AutoTrader {
                     .setEdge(s.profit())
                     .setOrderSize(orderSize)
                     .setRejection(v.rejectionStatus())
-                    .setReason(v.reason()));
+                    .setReason(v.reason())
+                    .setExpectedPnl(expectedPnl)
+                    .setLeg1Price(legs.get(0).price())
+                    .setLeg1Volume(legs.get(0).volume())
+                    .setLeg2Price(legs.get(1).price())
+                    .setLeg2Volume(legs.get(1).volume())
+                    .setLeg3Price(legs.get(2).price())
+                    .setLeg3Volume(legs.get(2).volume()));
             missed++;
             return;
         }
@@ -214,7 +221,7 @@ public class AutoTrader {
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
         var estimatedPnl = filled ? computePnlFromResults(legResults, orderSize) : 0.0;
 
-        finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true);
+        finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true, orderSize, expectedPnl);
     }
 
     public double computeMinimumVolume(Signal s) {
@@ -314,7 +321,7 @@ public class AutoTrader {
         var b3 = new OrderBook(config.getPair3(), legs.get(2).price(), 0.0, legs.get(2).price(), 0.0);
         var signal = new Signal(exchange, config, cycleEnum, edge, b1, b2, b3);
 
-        var trade = finalizeExecution(signal, legResults, latencyMs, estimatedPnl, filled, "MANUAL", false);
+        var trade = finalizeExecution(signal, legResults, latencyMs, estimatedPnl, filled, "MANUAL", false, notional, manualExpectedPnl);
         return new ManualTradeResult(trade.getId(), trade.getStatus(), estimatedPnl);
     }
 
@@ -362,11 +369,12 @@ public class AutoTrader {
      */
     private Trade finalizeExecution(Signal signal, List<LegResult> legResults,
             long latencyMs, double estimatedPnl, boolean filled,
-            String logPrefix, boolean sendAlert) {
+            String logPrefix, boolean sendAlert,
+            double orderSize, double expectedPnl) {
         executing = false;
         lastTradeCompletedMs = System.currentTimeMillis();
 
-        var trade = buildTrade(signal, legResults, latencyMs, estimatedPnl, filled);
+        var trade = buildTrade(signal, legResults, latencyMs, estimatedPnl, filled, orderSize, expectedPnl);
         tradeRepo.save(trade);
         positions.refreshBalances(signal.exchange());
         log.debug("[{}] Positions refreshed — exchange={}", logPrefix, signal.exchange());
@@ -423,14 +431,17 @@ public class AutoTrader {
     }
 
     private Trade buildTrade(Signal signal, List<LegResult> legResults,
-            long latencyMs, double estimatedPnl, boolean filled) {
+            long latencyMs, double estimatedPnl, boolean filled,
+            double orderSize, double expectedPnl) {
         var trade = new Trade()
                 .setTime(LocalDateTime.now())
                 .setDirection(signal.cycle().name())
                 .setSpread(signal.profit())
                 .setPnl(estimatedPnl)
                 .setStatus(broker.isSimulation() ? SIMULATION : filled ? FILLED : CANCELLED)
-                .setLatencyMs(latencyMs);
+                .setLatencyMs(latencyMs)
+                .setOrderSize(orderSize)
+                .setExpectedPnl(expectedPnl);
 
         legResults.forEach(lr -> {
             log.info("[TRADE] Leg {} — {} {} price={} volume={} status={} orderId={}",

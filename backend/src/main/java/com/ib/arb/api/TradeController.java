@@ -47,11 +47,15 @@ public class TradeController {
     public record TradeDetail(
         Long id, LocalDateTime time, String direction,
         double spread, double pnl, String status, double latencyMs,
+        double orderSize, double expectedPnl,
+        Double realProfit, Double realProfitPercent,
         List<TradeLeg> legs
     ) {
         static TradeDetail from(Trade t) {
             return new TradeDetail(t.getId(), t.getTime(), t.getDirection(),
                 t.getSpread(), t.getPnl(), t.getStatus(), t.getLatencyMs(),
+                t.getOrderSize(), t.getExpectedPnl(),
+                t.getRealProfit(), t.getRealProfitPercent(),
                 t.getLegs());
         }
     }

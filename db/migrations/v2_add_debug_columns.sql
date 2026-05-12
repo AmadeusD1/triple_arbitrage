@@ -1,0 +1,16 @@
+-- missed_opportunities: add expected PnL and per-leg prices/volumes for debugging
+ALTER TABLE missed_opportunities
+    ADD COLUMN IF NOT EXISTS expected_pnl  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS leg1_price    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS leg1_volume   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS leg2_price    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS leg2_volume   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS leg3_price    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS leg3_volume   DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- trades: add order size, expected PnL, and placeholder columns for future reconciliation
+ALTER TABLE trades
+    ADD COLUMN IF NOT EXISTS order_size          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS expected_pnl        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS real_profit         DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS real_profit_percent DOUBLE PRECISION;

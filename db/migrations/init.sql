@@ -1,11 +1,15 @@
 CREATE TABLE IF NOT EXISTS "trades" (
-    "id"         BIGSERIAL        NOT NULL,
-    "time"       TIMESTAMP(3)     NOT NULL,
-    "direction"  TEXT             NOT NULL,
-    "spread"     DOUBLE PRECISION NOT NULL,
-    "pnl"        DOUBLE PRECISION NOT NULL,
-    "status"     TEXT             NOT NULL,
-    "latency_ms" DOUBLE PRECISION NOT NULL,
+    "id"                   BIGSERIAL        NOT NULL,
+    "time"                 TIMESTAMP(3)     NOT NULL,
+    "direction"            TEXT             NOT NULL,
+    "spread"               DOUBLE PRECISION NOT NULL,
+    "pnl"                  DOUBLE PRECISION NOT NULL,
+    "status"               TEXT             NOT NULL,
+    "latency_ms"           DOUBLE PRECISION NOT NULL,
+    "order_size"           DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "expected_pnl"         DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "real_profit"          DOUBLE PRECISION,
+    "real_profit_percent"  DOUBLE PRECISION,
 
     CONSTRAINT "trades_pkey" PRIMARY KEY ("id")
 );
@@ -86,18 +90,25 @@ INSERT INTO "triangles" ("exchange","pair1","pair2","pair3","min_profit_usd","mi
 ON CONFLICT ("exchange","pair1","pair2","pair3") DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS "missed_opportunities" (
-    "id"          BIGSERIAL        NOT NULL,
-    "time"        TIMESTAMP(3)     NOT NULL,
-    "triangle_id" BIGINT           NOT NULL,
-    "exchange"    TEXT             NOT NULL,
-    "pair1"       TEXT             NOT NULL,
-    "pair2"       TEXT             NOT NULL,
-    "pair3"       TEXT             NOT NULL,
-    "cycle"       TEXT             NOT NULL,
-    "edge"        DOUBLE PRECISION NOT NULL,
-    "order_size"  DOUBLE PRECISION NOT NULL,
-    "rejection"   TEXT             NOT NULL,
-    "reason"      TEXT,
+    "id"           BIGSERIAL        NOT NULL,
+    "time"         TIMESTAMP(3)     NOT NULL,
+    "triangle_id"  BIGINT           NOT NULL,
+    "exchange"     TEXT             NOT NULL,
+    "pair1"        TEXT             NOT NULL,
+    "pair2"        TEXT             NOT NULL,
+    "pair3"        TEXT             NOT NULL,
+    "cycle"        TEXT             NOT NULL,
+    "edge"         DOUBLE PRECISION NOT NULL,
+    "order_size"   DOUBLE PRECISION NOT NULL,
+    "rejection"    TEXT             NOT NULL,
+    "reason"       TEXT,
+    "expected_pnl" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "leg1_price"   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "leg1_volume"  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "leg2_price"   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "leg2_volume"  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "leg3_price"   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "leg3_volume"  DOUBLE PRECISION NOT NULL DEFAULT 0,
 
     CONSTRAINT "missed_opportunities_pkey" PRIMARY KEY ("id")
 );

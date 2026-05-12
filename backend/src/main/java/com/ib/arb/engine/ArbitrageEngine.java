@@ -154,7 +154,7 @@ public class ArbitrageEngine {
             case SBS -> b1.bid() * b3.bid() - b2.ask();
         };
 
-        if (edge > 0 && edge > threshold) {
+        if (edge > -0.000 && edge > threshold) {
             log.debug("[SCAN] Triangle={} cycle={} edge={} — PROFITABLE (threshold={})",
                 config.getId(), cycle, String.format("%.5f", edge), threshold);
             return Optional.of(new Signal(feed.getExchange(), config, cycle, edge, b1, b2, b3));

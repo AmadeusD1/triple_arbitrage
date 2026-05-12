@@ -22,6 +22,13 @@ public class MissedOpportunity {
     private double orderSize;
     private String rejection;
     private String reason;
+    private double expectedPnl;
+    @Column(name = "leg1_price")  private double leg1Price;
+    @Column(name = "leg1_volume") private double leg1Volume;
+    @Column(name = "leg2_price")  private double leg2Price;
+    @Column(name = "leg2_volume") private double leg2Volume;
+    @Column(name = "leg3_price")  private double leg3Price;
+    @Column(name = "leg3_volume") private double leg3Volume;
 
     public Long getId()           { return id; }
     public LocalDateTime getTime(){ return time; }
@@ -35,6 +42,13 @@ public class MissedOpportunity {
     public double getOrderSize()  { return orderSize; }
     public String getRejection()  { return rejection; }
     public String getReason()     { return reason; }
+    public double getExpectedPnl(){ return expectedPnl; }
+    public double getLeg1Price()  { return leg1Price; }
+    public double getLeg1Volume() { return leg1Volume; }
+    public double getLeg2Price()  { return leg2Price; }
+    public double getLeg2Volume() { return leg2Volume; }
+    public double getLeg3Price()  { return leg3Price; }
+    public double getLeg3Volume() { return leg3Volume; }
 
     public MissedOpportunity setTime(LocalDateTime time)     { this.time = time;             return this; }
     public MissedOpportunity setTriangleId(Long triangleId)  { this.triangleId = triangleId; return this; }
@@ -47,4 +61,11 @@ public class MissedOpportunity {
     public MissedOpportunity setOrderSize(double orderSize)  { this.orderSize = orderSize;    return this; }
     public MissedOpportunity setRejection(String rejection)  { this.rejection = rejection;    return this; }
     public MissedOpportunity setReason(String reason)        { this.reason = reason;          return this; }
+    public MissedOpportunity setExpectedPnl(double v)  { this.expectedPnl = v;  return this; }
+    public MissedOpportunity setLeg1Price(double v)    { this.leg1Price = v;    return this; }
+    public MissedOpportunity setLeg1Volume(double v)   { this.leg1Volume = v;   return this; }
+    public MissedOpportunity setLeg2Price(double v)    { this.leg2Price = v;    return this; }
+    public MissedOpportunity setLeg2Volume(double v)   { this.leg2Volume = v;   return this; }
+    public MissedOpportunity setLeg3Price(double v)    { this.leg3Price = v;    return this; }
+    public MissedOpportunity setLeg3Volume(double v)   { this.leg3Volume = v;   return this; }
 }

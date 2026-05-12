@@ -37,6 +37,19 @@ function TradeDetailDialog({ tradeId, onClose }: { tradeId: number | null; onClo
             <CircularProgress />
           </Box>
         ) : (
+          <>
+            <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', mb: 2, fontSize: '0.85rem' }}>
+              <Box><Typography variant="caption" color="text.secondary">Order Size</Typography>
+                <Typography variant="body2">${detail.orderSize.toFixed(2)}</Typography></Box>
+              <Box><Typography variant="caption" color="text.secondary">Exp PnL</Typography>
+                <Typography variant="body2" sx={{ color: detail.expectedPnl >= 0 ? 'success.main' : 'error.main' }}>
+                  ${detail.expectedPnl.toFixed(2)}</Typography></Box>
+              {detail.realProfit != null && (
+                <Box><Typography variant="caption" color="text.secondary">Real Profit</Typography>
+                  <Typography variant="body2" sx={{ color: detail.realProfit >= 0 ? 'success.main' : 'error.main' }}>
+                    ${detail.realProfit.toFixed(2)}{detail.realProfitPercent != null ? ` (${detail.realProfitPercent.toFixed(4)}%)` : ''}</Typography></Box>
+              )}
+            </Box>
           <TableContainer>
             <Table size="small">
               <TableHead>
@@ -72,6 +85,7 @@ function TradeDetailDialog({ tradeId, onClose }: { tradeId: number | null; onClo
               </TableBody>
             </Table>
           </TableContainer>
+          </>
         )}
       </DialogContent>
     </Dialog>
@@ -115,6 +129,8 @@ export default function Trades() {
                 <TableCell>Dir</TableCell>
                 <TableCell align="right">Spread</TableCell>
                 <TableCell align="right">PnL</TableCell>
+                <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>Order Size</TableCell>
+                <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>Exp PnL</TableCell>
                 <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Latency</TableCell>
                 <TableCell>Status</TableCell>
               </TableRow>
@@ -129,6 +145,10 @@ export default function Trades() {
                   <TableCell align="right" sx={{ color: t.pnl >= 0 ? 'success.main' : 'error.main' }}>
                     ${t.pnl.toFixed(2)}
                   </TableCell>
+                  <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>${t.orderSize.toFixed(0)}</TableCell>
+                  <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' }, color: t.expectedPnl >= 0 ? 'success.main' : 'error.main' }}>
+                    ${t.expectedPnl.toFixed(2)}
+                  </TableCell>
                   <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{t.latencyMs.toFixed(0)} ms</TableCell>
                   <TableCell>
                     <Chip label={t.status}
@@ -139,7 +159,7 @@ export default function Trades() {
               ))}
               {trades.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 3, color: 'text.secondary' }}>
                     No trades yet
                   </TableCell>
                 </TableRow>

@@ -22,6 +22,10 @@ export interface Trade {
   pnl: number;
   status: TradeStatus;
   latencyMs: number;
+  orderSize: number;
+  expectedPnl: number;
+  realProfit: number | null;
+  realProfitPercent: number | null;
 }
 
 export interface TradeDetail extends Trade {
@@ -55,6 +59,13 @@ export interface MissedOpportunity {
   orderSize: number;
   rejection: string;
   reason: string | null;
+  expectedPnl: number;
+  leg1Price: number;
+  leg1Volume: number;
+  leg2Price: number;
+  leg2Volume: number;
+  leg3Price: number;
+  leg3Volume: number;
 }
 
 export interface DashboardSnapshot {
