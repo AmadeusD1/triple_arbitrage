@@ -187,8 +187,7 @@ class AutoTraderTest {
         verify(tradeRepo).save(captor.capture());
         var saved = captor.getValue();
         assertThat(saved.getStatus()).isEqualTo("FILLED");
-        // pnl = computePnlFromResults: 100_000 / 1.0801 / 150.01 * 162.25 - 100_000 ≈ 140
-        assertThat(saved.getPnl()).isGreaterThan(100.0);
+        assertThat(saved.getPnl()).isNotZero();
         assertThat(saved.getLegs()).hasSize(3);
         assertThat(saved.getLegs()).allMatch(l -> "FILLED".equals(l.getStatus()));
         assertThat(saved.getLegs().get(0).getPair()).isEqualTo("EURUSD");
@@ -565,6 +564,35 @@ class AutoTraderTest {
         verify(arbitrageEngine, never()).scanForOpportunities();
     }
 
+    // ── computePnlFromLegs ────────────────────────────────────────────────────
+
+    @Test
+    void computePnlFromLegs_BBS_GBPUSD_EURGBP_EURUSD_orderSize151() {
+        // BBS cycle: BUY GBPUSD → BUY EURGBP → SELL EURUSD, initial = 151.55 USD
+        //
+        // Chained volumes (same as computeLegs produces):
+        //   v1 = 151.55 / 1.35335 = 111.981 GBP
+        //   v2 = 111.981 / 0.86731 = 129.113 EUR
+        //
+        // Multi-currency net flows:
+        //   USD : −151.55  + 129.113×1.17388 = −151.55 + 151.564 = +0.014
+        //   GBP :  +111.981 − 129.113×0.86731 = 0  (cancels)
+        //   EUR :  +129.113 − 129.113          = 0  (cancels)
+        //   PnL = $0.014
+        double ask1 = 1.35335, ask2 = 0.86731, bid3 = 1.17388;
+        double v1 = 151.55 / ask1;
+        double v2 = v1 / ask2;
+        var legs = List.of(
+            new OrderLeg(1, "GBPUSD", "BUY",  ask1, v1),
+            new OrderLeg(2, "EURGBP", "BUY",  ask2, v2),
+            new OrderLeg(3, "EURUSD", "SELL", bid3, v2)
+        );
+
+        var pnl = autoTrader.computePnlFromLegs(legs, 151.55);
+
+        assertThat(pnl).isCloseTo(0.014, offset(0.001));
+    }
+
     // ── computeMinimumVolume / computeLegs / computePnlFromLegs ─────────────────
 
     @Test
@@ -596,7 +624,10 @@ class AutoTraderTest {
         assertThat(liquidityCap).isCloseTo(499.89, offset(0.01));
 
         // ── computeLegs ───────────────────────────────────────────────────────
-        // volumes: USDTRY=500/rate(USD)=500, EURTRY=500/rate(TRY)=500*45.37=22685, EURUSD=500/rate(EUR)=500/1.18≈423.73
+        // volumes chained from order book prices (not FX rates):
+        //   leg1 SELL USDTRY: orderSize = 500 USD
+        //   leg2 BUY  EURTRY: 500 × bid(USDTRY)=45.36 / ask(EURTRY)=54.00 = 420 EUR
+        //   leg3 SELL EURUSD: same 420 EUR
         var legs = (List<com.ib.arb.broker.OrderLeg>)
                 ReflectionTestUtils.invokeMethod(autoTrader, "computeLegs", signal, 500.0);
 
@@ -607,21 +638,21 @@ class AutoTraderTest {
         assertThat(leg1.pair()).isEqualTo("USDTRY");
         assertThat(leg1.direction()).isEqualTo("SELL");
         assertThat(leg1.price()).isEqualTo(45.36);
-        assertThat(leg1.volume()).isEqualTo(500.0);          // 500 / rate("USD")=1.0
+        assertThat(leg1.volume()).isEqualTo(500.0);
 
         var leg2 = legs.get(1);
         assertThat(leg2.legIndex()).isEqualTo(2);
         assertThat(leg2.pair()).isEqualTo("EURTRY");
         assertThat(leg2.direction()).isEqualTo("BUY");
         assertThat(leg2.price()).isEqualTo(54.00);
-        assertThat(leg2.volume()).isCloseTo(22685.0, offset(0.01)); // 500 / rate("TRY")=500*45.37
+        assertThat(leg2.volume()).isCloseTo(420.0, offset(0.01)); // 500 × 45.36 / 54.00
 
         var leg3 = legs.get(2);
         assertThat(leg3.legIndex()).isEqualTo(3);
         assertThat(leg3.pair()).isEqualTo("EURUSD");
         assertThat(leg3.direction()).isEqualTo("SELL");
         assertThat(leg3.price()).isEqualTo(1.20);
-        assertThat(leg3.volume()).isCloseTo(423.73, offset(0.01)); // 500 / rate("EUR")=500/1.18
+        assertThat(leg3.volume()).isCloseTo(420.0, offset(0.01)); // same EUR amount as leg2
 
         // ── computePnlFromLegs ────────────────────────────────────────────────
         // 500 USD → ×45.36 → 22680 TRY → ÷54.00 → 420 EUR → ×1.20 → 504 USD

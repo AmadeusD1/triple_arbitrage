@@ -36,6 +36,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
@@ -219,7 +220,7 @@ public class AutoTrader {
         var latencyMs = System.currentTimeMillis() - start;
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
-        var estimatedPnl = filled ? computePnlFromResults(legResults, orderSize) : 0.0;
+        var estimatedPnl = filled ? expectedPnl: 0.0;
 
         finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true, orderSize, expectedPnl);
     }
@@ -468,27 +469,42 @@ public class AutoTrader {
         var pairs = new String[] { s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
         var dirs = s.cycle().dirs;
         return switch (s.cycle()) {
-            case BBS -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), orderSize / quoteRate(pairs[1])),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
-            case BSS -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), orderSize / baseRate(pairs[1])),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
-            case BSB -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), orderSize / quoteRate(pairs[0])),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), orderSize / baseRate(pairs[1])),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(), orderSize / quoteRate(pairs[2])));
-            case SBS -> List.of(
-                    new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(), orderSize / baseRate(pairs[0])),
-                    new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), orderSize / quoteRate(pairs[1])),
-                    new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), orderSize / baseRate(pairs[2])));
+            case BBS -> {
+                // USD ÷ask1→ base1 ÷ask2→ base2 ×bid3→ USD
+                double v1 = orderSize / s.b1().ask();
+                double v2 = v1 / s.b2().ask();
+                yield List.of(
+                        new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), v1),
+                        new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), v2),
+                        new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), v2));
+            }
+            case BSS -> {
+                // USD ÷ask1→ base1 ×bid2→ base3 ×bid3→ USD
+                double v1 = orderSize / s.b1().ask();
+                double v3 = v1 * s.b2().bid();
+                yield List.of(
+                        new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), v1),
+                        new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), v1),
+                        new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), v3));
+            }
+            case BSB -> {
+                // USD ÷ask1→ base1 ×bid2→ quote2 ÷ask3→ USD
+                double v1 = orderSize / s.b1().ask();
+                double v3 = v1 * s.b2().bid() / s.b3().ask();
+                yield List.of(
+                        new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), v1),
+                        new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), v1),
+                        new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(), v3));
+            }
+            case SBS -> {
+                // USD ×bid1→ quote1 ÷ask2→ base2 ×bid3→ USD
+                double v2 = orderSize * s.b1().bid() / s.b2().ask();
+                yield List.of(
+                        new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(), orderSize),
+                        new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), v2),
+                        new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), v2));
+            }
         };
-    }
-
-    private double baseRate(String pair) {
-        return currencyRateFeed.getRate(pair.substring(0, 3));
     }
 
     private double quoteRate(String pair) {
@@ -499,21 +515,24 @@ public class AutoTrader {
         return DoubleStream.of(a, b, c).min().orElse(0);
     }
 
-    private double computePnlFromLegs(List<OrderLeg> legs, double initialAmount) {
-        var amount = initialAmount;
+    public double computePnlFromLegs(List<OrderLeg> legs, double initialAmount) {
+        var net = new HashMap<String, Double>();
         for (var leg : legs) {
-            amount = SELL.equals(leg.direction()) ? amount * leg.price() : amount / leg.price();
+            var base  = leg.pair().substring(0, 3);
+            var quote = leg.pair().substring(3);
+            if (BUY.equals(leg.direction())) {
+                net.merge(base,   leg.volume(),                Double::sum); // receive base
+                net.merge(quote, -leg.volume() * leg.price(),  Double::sum); // spend quote
+            } else {
+                net.merge(base,  -leg.volume(),                Double::sum); // spend base
+                net.merge(quote,  leg.volume() * leg.price(),  Double::sum); // receive quote
+            }
         }
-        return amount - initialAmount;
+        return net.entrySet().stream()
+                .mapToDouble(e -> e.getValue() * currencyRateFeed.getRate(e.getKey()))
+                .sum();
     }
 
-    private double computePnlFromResults(List<LegResult> results, double initialAmount) {
-        var amount = initialAmount;
-        for (var result : results) {
-            amount = SELL.equals(result.direction()) ? amount * result.price() : amount / result.price();
-        }
-        return amount - initialAmount;
-    }
 
     // -------------------------------------------------------------------------
     // Stats & broadcast
