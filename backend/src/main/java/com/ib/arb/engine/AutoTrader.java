@@ -17,7 +17,6 @@ import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.risk.RiskService;
 import static com.ib.arb.common.Constants.Direction.BUY;
-import static com.ib.arb.common.Constants.Direction.SELL;
 import static com.ib.arb.common.Constants.LegStatus.FAILED;
 import static com.ib.arb.common.Constants.LegStatus.SIMULATED;
 import static com.ib.arb.common.Constants.TradeStatus.CANCELLED;
@@ -26,7 +25,6 @@ import static com.ib.arb.common.Constants.TradeStatus.SIMULATION;
 import static com.ib.arb.common.Constants.RejectionStatus.REJECTED_BALANCE;
 import static com.ib.arb.common.Constants.RejectionStatus.REJECTED_RISK;
 import static com.ib.arb.common.Constants.RejectionStatus.REJECTED_PROFIT;
-import com.ib.arb.engine.ArbitrageEngine;
 import com.ib.arb.scanner.Cycle;
 import com.ib.arb.scanner.Signal;
 
@@ -146,30 +144,14 @@ public class AutoTrader {
         log.info("[ARB] Signal detected — triangle={} exchange={} cycle={} profit={}",
                 s.config().getId(), s.exchange(), s.cycle(), String.format("%.5f", s.profit()));
 
-        var liquidityCap = computeMinimumVolume(s);
-        log.info("[ARB] Liquidity cap — {}", String.format("%.2f", liquidityCap));
-        var pairs = new String[] { s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
-        var dirs = s.cycle().dirs;
+        var maxVolume = calculateMaxVolume(s);
+        log.info("[ARB] Liquidity cap — {}", String.format("%.2f", maxVolume));
+        maxVolume = Math.min(orderSizeUsd, maxVolume);
 
-        // Pass 1: min available balance in USD across all three spent currencies
-        var minBalanceUsd = IntStream.range(0, pairs.length)
-                .mapToDouble(i -> {
-                    var spentCcy = BUY.equals(dirs[i]) ? pairs[i].substring(3) : pairs[i].substring(0, 3);
-                    return positions.getAvailableAmount(s.exchange(), spentCcy) * currencyRateFeed.getRate(spentCcy);
-                })
-                .min()
-                .orElse(0.0);
-        var balanceCap = Math.min(minBalanceUsd * 0.95, orderSizeUsd);
-        log.debug("[ARB] Balance cap — minBalanceUsd={} → capped={}",
-                String.format("%.2f", minBalanceUsd), String.format("%.2f", balanceCap));
+        var legs = computeLegs(s, maxVolume);
+        var expectedPnl = computePnlFromLegs(legs, maxVolume);
 
-        var orderSize = Math.min(liquidityCap, balanceCap);
-
-        var legs = computeLegs(s, orderSize);
-
-        var expectedPnl = computePnlFromLegs(legs, orderSize);
-
-        var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), orderSize, s.profit(), expectedPnl);
+        var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), maxVolume, s.profit(), expectedPnl);
         if (!v.allowed()) {
             switch (v.rejectionStatus()) {
                 case REJECTED_BALANCE -> log.warn("[ARB] Missed — insufficient balance for triangle={} cycle={}",
@@ -186,28 +168,28 @@ public class AutoTrader {
                     .setPair3(s.config().getPair3())
                     .setCycle(s.cycle().name())
                     .setEdge(s.profit())
-                    .setOrderSize(orderSize)
+                    .setOrderSize(maxVolume)
                     .setRejection(v.rejectionStatus())
                     .setReason(v.reason())
                     .setExpectedPnl(expectedPnl)
                     .setLeg1Price(legs.get(0).price())
-                    .setLeg1Volume(legs.get(0).volume())
+                    .setLeg1Volume(legs.get(0).quantity())
                     .setLeg2Price(legs.get(1).price())
-                    .setLeg2Volume(legs.get(1).volume())
+                    .setLeg2Volume(legs.get(1).quantity())
                     .setLeg3Price(legs.get(2).price())
-                    .setLeg3Volume(legs.get(2).volume()));
+                    .setLeg3Volume(legs.get(2).quantity()));
             missed++;
             return;
         }
 
         log.info("[ARB] Placing orders — triangle={} cycle={} orderSize={} expectedPnl={}",
-                s.config().getId(), s.cycle(), orderSize, String.format("%.2f", expectedPnl));
+                s.config().getId(), s.cycle(), maxVolume, String.format("%.2f", expectedPnl));
         var start = System.currentTimeMillis();
         List<LegResult> legResults;
         if (broker.isSimulation()) {
             legResults = legs.stream()
                     .map(l -> new LegResult(l.legIndex(), l.pair(), l.direction(),
-                            l.price(), l.volume(), true, null))
+                            l.price(), l.quantity(), true, null))
                     .toList();
             log.info("[SIM] Cycle {} | {} | profit={}", s.cycle(),
                     legResults.stream()
@@ -222,13 +204,11 @@ public class AutoTrader {
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
         var estimatedPnl = filled ? expectedPnl: 0.0;
 
-        finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true, orderSize, expectedPnl);
+        finalizeExecution(s, legResults, latencyMs, estimatedPnl, filled, "ARB", true, maxVolume, expectedPnl);
     }
 
-    public double computeMinimumVolume(Signal s) {
+    public double calculateMaxVolume(Signal s) {
         var pairs = new String[] { s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
-        // compute the minimum volume in USD across all three legs, based on price
-        // levels and currency rates
         double minVolume = switch (s.cycle()) {
             case BBS -> min3(
                     s.b1().askQty() * s.b1().ask() * quoteRate(pairs[0]),
@@ -273,8 +253,8 @@ public class AutoTrader {
 
         var exchange = Exchange.valueOf(config.getExchange().toUpperCase());
         var cycleEnum = Cycle.valueOf(cycle);
-        // Derive notional size from leg 1 (price × volume) for balance and risk checks
-        var notional = legs.get(0).price() * legs.get(0).volume();
+        // Derive notional size from leg 1 (price × quantity) for balance and risk checks
+        var notional = legs.get(0).price() * legs.get(0).quantity();
         var edge = switch (cycleEnum) {
             case BBS -> legs.get(0).price() * legs.get(1).price() - legs.get(2).price();
             case BSS -> legs.get(0).price() - legs.get(1).price() * legs.get(2).price();
@@ -308,7 +288,7 @@ public class AutoTrader {
         if (broker.isSimulation()) {
             legResults = legs.stream()
                     .map(l -> new LegResult(l.legIndex(), l.pair(), l.direction(),
-                            l.price(), l.volume(), true, null))
+                            l.price(), l.quantity(), true, null))
                     .toList();
         } else {
             legResults = broker.placeOrderLegs(legs);
@@ -466,45 +446,24 @@ public class AutoTrader {
     }
 
     public List<OrderLeg> computeLegs(Signal s, double orderSize) {
-        var pairs = new String[] { s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
-        var dirs = s.cycle().dirs;
-        return switch (s.cycle()) {
-            case BBS -> {
-                // USD ÷ask1→ base1 ÷ask2→ base2 ×bid3→ USD
-                double v1 = orderSize / s.b1().ask();
-                double v2 = v1 / s.b2().ask();
-                yield List.of(
-                        new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), v1),
-                        new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), v2),
-                        new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), v2));
-            }
-            case BSS -> {
-                // USD ÷ask1→ base1 ×bid2→ base3 ×bid3→ USD
-                double v1 = orderSize / s.b1().ask();
-                double v3 = v1 * s.b2().bid();
-                yield List.of(
-                        new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), v1),
-                        new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), v1),
-                        new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), v3));
-            }
-            case BSB -> {
-                // USD ÷ask1→ base1 ×bid2→ quote2 ÷ask3→ USD
-                double v1 = orderSize / s.b1().ask();
-                double v3 = v1 * s.b2().bid() / s.b3().ask();
-                yield List.of(
-                        new OrderLeg(1, pairs[0], dirs[0], s.b1().ask(), v1),
-                        new OrderLeg(2, pairs[1], dirs[1], s.b2().bid(), v1),
-                        new OrderLeg(3, pairs[2], dirs[2], s.b3().ask(), v3));
-            }
-            case SBS -> {
-                // USD ×bid1→ quote1 ÷ask2→ base2 ×bid3→ USD
-                double v2 = orderSize * s.b1().bid() / s.b2().ask();
-                yield List.of(
-                        new OrderLeg(1, pairs[0], dirs[0], s.b1().bid(), orderSize),
-                        new OrderLeg(2, pairs[1], dirs[1], s.b2().ask(), v2),
-                        new OrderLeg(3, pairs[2], dirs[2], s.b3().bid(), v2));
-            }
+        var pairs = new String[]{ s.config().getPair1(), s.config().getPair2(), s.config().getPair3() };
+        var dirs  = s.cycle().dirs;
+        // quantity in base currency = orderSize / rate(base) — same USD notional on every leg
+        var prices = switch (s.cycle()) {
+            case BBS -> new double[]{ s.b1().ask(), s.b2().ask(), s.b3().bid() };
+            case BSS -> new double[]{ s.b1().ask(), s.b2().bid(), s.b3().bid() };
+            case BSB -> new double[]{ s.b1().ask(), s.b2().bid(), s.b3().ask() };
+            case SBS -> new double[]{ s.b1().bid(), s.b2().ask(), s.b3().bid() };
         };
+        return IntStream.range(0, 3)
+                .mapToObj(i -> new OrderLeg(
+                        i + 1, pairs[i], dirs[i], prices[i],
+                        orderSize / baseRate(pairs[i])))
+                .toList();
+    }
+
+    private double baseRate(String pair) {
+        return currencyRateFeed.getRate(pair.substring(0, 3));
     }
 
     private double quoteRate(String pair) {
@@ -520,12 +479,13 @@ public class AutoTrader {
         for (var leg : legs) {
             var base  = leg.pair().substring(0, 3);
             var quote = leg.pair().substring(3);
+            // quantity is in the base currency for all legs
             if (BUY.equals(leg.direction())) {
-                net.merge(base,   leg.volume(),                Double::sum); // receive base
-                net.merge(quote, -leg.volume() * leg.price(),  Double::sum); // spend quote
+                net.merge(base,   leg.quantity(),               Double::sum); // receive base
+                net.merge(quote, -leg.quantity() * leg.price(), Double::sum); // spend quote
             } else {
-                net.merge(base,  -leg.volume(),                Double::sum); // spend base
-                net.merge(quote,  leg.volume() * leg.price(),  Double::sum); // receive quote
+                net.merge(base,  -leg.quantity(),               Double::sum); // spend base
+                net.merge(quote,  leg.quantity() * leg.price(), Double::sum); // receive quote
             }
         }
         return net.entrySet().stream()

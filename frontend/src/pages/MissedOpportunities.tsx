@@ -21,9 +21,9 @@ function rejectionChip(rejection: string) {
 function LegDetailDialog({ row, onClose }: { row: MissedOpportunity | null; onClose: () => void }) {
   if (!row) return null;
   const legs = [
-    { pair: row.pair1, price: row.leg1Price, volume: row.leg1Volume },
-    { pair: row.pair2, price: row.leg2Price, volume: row.leg2Volume },
-    { pair: row.pair3, price: row.leg3Price, volume: row.leg3Volume },
+    { pair: row.pair1, price: row.leg1Price, quantity: row.leg1Volume },
+    { pair: row.pair2, price: row.leg2Price, quantity: row.leg2Volume },
+    { pair: row.pair3, price: row.leg3Price, quantity: row.leg3Volume },
   ];
   return (
     <Dialog open={row != null} onClose={onClose} maxWidth="sm" fullWidth>
@@ -57,7 +57,7 @@ function LegDetailDialog({ row, onClose }: { row: MissedOpportunity | null; onCl
                   <TableCell>{i + 1}</TableCell>
                   <TableCell>{l.pair}</TableCell>
                   <TableCell align="right">{l.price.toFixed(5)}</TableCell>
-                  <TableCell align="right">{l.volume.toFixed(4)}</TableCell>
+                  <TableCell align="right">{l.quantity.toFixed(4)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

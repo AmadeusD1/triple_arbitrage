@@ -41,7 +41,7 @@ function computeLegs(t: TriangleConfig, cycle: CycleDirection, size: number, pri
   return [t.pair1, t.pair2, t.pair3].map((pair, i) => {
     const snap = prices.find(p => p.pair === pair);
     const price = snap ? (dirs[i] === 'BUY' ? snap.ask : snap.bid) : 0;
-    return { legIndex: i + 1, pair, direction: dirs[i], price, volume: price > 0 ? size / price : 0 };
+    return { legIndex: i + 1, pair, direction: dirs[i], price, quantity: price > 0 ? size / price : 0 };
   });
 }
 
@@ -75,7 +75,7 @@ export default function Triangles({ prices }: Props) {
     if (tradeTarget) setLegs(computeLegs(tradeTarget, cycle, DEFAULT_SIZE, prices));
   };
 
-  const updateLeg = (index: number, field: 'price' | 'volume', value: number) => {
+  const updateLeg = (index: number, field: 'price' | 'quantity', value: number) => {
     setLegs(prev => prev.map(l => l.legIndex === index ? { ...l, [field]: value } : l));
   };
 
@@ -251,8 +251,8 @@ export default function Triangles({ prices }: Props) {
                         sx={{ width: { xs: '100%', sm: 110 } }} />
                     </TableCell>
                     <TableCell>
-                      <TextField type="number" size="small" value={l.volume.toFixed(4)}
-                        onChange={(e) => updateLeg(l.legIndex, 'volume', Number(e.target.value))}
+                      <TextField type="number" size="small" value={l.quantity.toFixed(4)}
+                        onChange={(e) => updateLeg(l.legIndex, 'quantity', Number(e.target.value))}
                         sx={{ width: { xs: '100%', sm: 110 } }} />
                     </TableCell>
                   </TableRow>
