@@ -297,9 +297,9 @@ public class AutoTrader {
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
         var estimatedPnl = filled ? edge * notional : 0.0;
-        var b1 = new OrderBook(config.getPair1(), legs.get(0).price(), 0.0, legs.get(0).price(), 0.0);
-        var b2 = new OrderBook(config.getPair2(), legs.get(1).price(), 0.0, legs.get(1).price(), 0.0);
-        var b3 = new OrderBook(config.getPair3(), legs.get(2).price(), 0.0, legs.get(2).price(), 0.0);
+        var b1 = new OrderBook(config.getPair1(), legs.get(0).price(), legs.get(0).quantity(), legs.get(0).price(), legs.get(0).quantity());
+        var b2 = new OrderBook(config.getPair2(), legs.get(1).price(), legs.get(1).quantity(), legs.get(1).price(), legs.get(1).quantity());
+        var b3 = new OrderBook(config.getPair3(), legs.get(2).price(), legs.get(2).quantity(), legs.get(2).price(), legs.get(2).quantity());
         var signal = new Signal(exchange, config, cycleEnum, edge, b1, b2, b3);
 
         var trade = finalizeExecution(signal, legResults, latencyMs, estimatedPnl, filled, "MANUAL", false, notional, manualExpectedPnl);
