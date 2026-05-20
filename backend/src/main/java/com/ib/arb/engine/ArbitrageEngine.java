@@ -153,7 +153,7 @@ public class ArbitrageEngine {
         var edge = switch (cycle) {
             case BBS -> b3.bid() - b1.ask() * b2.ask();
             case BSS -> b2.bid() * b3.bid() - b1.ask();
-            case BSB -> 1.0 / b1.ask() * b2.bid() - b3.ask();
+            case BSB -> b2.bid() - b1.ask() * b3.ask();
             case SBS -> b1.bid() * b3.bid() - b2.ask();
         };
 
