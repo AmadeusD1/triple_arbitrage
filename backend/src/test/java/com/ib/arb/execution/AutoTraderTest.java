@@ -316,7 +316,7 @@ class AutoTraderTest {
         new OrderLeg(2, "USDJPY", "BUY",  150.01,    72.0),
         new OrderLeg(3, "EURJPY", "SELL", 162.00,    67.0)
     );
-    // notional = leg1.price × leg1.volume = 1.0801 × 10_000 ≈ 10_801 USD
+    // notional = leg1.price × leg1.quantity = 1.0801 × 10_000 ≈ 10_801 USD
 
     @Test
     void manualTrade_rejected_whenTooManyOpenOrders() {
@@ -568,32 +568,37 @@ class AutoTraderTest {
 
     @Test
     void computePnlFromLegs_BBS_GBPUSD_EURGBP_EURUSD_orderSize151() {
-        // BBS cycle: BUY GBPUSD → BUY EURGBP → SELL EURUSD, initial = 151.55 USD
+        // BBS cycle: BUY GBPUSD → BUY EURGBP → SELL EURUSD, orderSize = 151.55 USD
         //
-        // Chained volumes (same as computeLegs produces):
-        //   v1 = 151.55 / 1.35335 = 111.981 GBP
-        //   v2 = 111.981 / 0.86731 = 129.113 EUR
+        // Quantities = orderSize / baseRate(pair):
+        //   leg1 BUY GBPUSD  (base=GBP): qty = 151.55 / rate("GBP") = 111.982 GBP
+        //   leg2 BUY EURGBP  (base=EUR): qty = 151.55 / rate("EUR") = 129.097 EUR
+        //   leg3 SELL EURUSD (base=EUR): qty = 151.55 / rate("EUR") = 129.097 EUR
         //
-        // Multi-currency net flows:
-        //   USD : −151.55  + 129.113×1.17388 = −151.55 + 151.564 = +0.014
-        //   GBP :  +111.981 − 129.113×0.86731 = 0  (cancels)
-        //   EUR :  +129.113 − 129.113          = 0  (cancels)
-        //   PnL = $0.014
+        // Standard formula (quantity in base currency):
+        //   USD: −111.982×1.35335 + 129.097×1.17388 = 0
+        //   GBP: +111.982 − 129.097×0.86731 = +0.015 × 1.35335 = +$0.020
+        //   EUR: 0
+        //   PnL ≈ $0.020
+        when(currencyRateFeed.getRate("GBP")).thenReturn(1.35335);
+        when(currencyRateFeed.getRate("EUR")).thenReturn(1.17388);
+
         double ask1 = 1.35335, ask2 = 0.86731, bid3 = 1.17388;
-        double v1 = 151.55 / ask1;
-        double v2 = v1 / ask2;
+        double qty1 = 151.55 / 1.35335;   // GBP (baseRate=rate("GBP"))
+        double qty2 = 151.55 / 1.17388;   // EUR (baseRate=rate("EUR"))
+        double qty3 = qty2;                // EUR (same base for EURUSD)
         var legs = List.of(
-            new OrderLeg(1, "GBPUSD", "BUY",  ask1, v1),
-            new OrderLeg(2, "EURGBP", "BUY",  ask2, v2),
-            new OrderLeg(3, "EURUSD", "SELL", bid3, v2)
+            new OrderLeg(1, "GBPUSD", "BUY",  ask1, qty1),
+            new OrderLeg(2, "EURGBP", "BUY",  ask2, qty2),
+            new OrderLeg(3, "EURUSD", "SELL", bid3, qty3)
         );
 
         var pnl = autoTrader.computePnlFromLegs(legs, 151.55);
 
-        assertThat(pnl).isCloseTo(0.014, offset(0.001));
+        assertThat(pnl).isCloseTo(0.02, offset(0.01));
     }
 
-    // ── computeMinimumVolume / computeLegs / computePnlFromLegs ─────────────────
+    // ── calculateMaxVolume / computeLegs / computePnlFromLegs ───────────────────
 
     @Test
     @SuppressWarnings("unchecked")
@@ -616,18 +621,18 @@ class AutoTraderTest {
         var signal = new Signal(Exchange.KRAKEN, triSbs, com.ib.arb.scanner.Cycle.SBS,
                 0.432, obUsdTry, obEurTry, obEurUsd);
 
-        // ── computeMinimumVolume ──────────────────────────────────────────────
+        // ── calculateMaxVolume ────────────────────────────────────────────────
         // SBS: min3(bidQty(USDTRY)*bid*rate(TRY), askQty(EURTRY)*ask*rate(TRY), bidQty(EURUSD)*bid*rate(USD))
         //    = min3(500*45.36*(1/45.37), 1M*54*(1/45.37), 1M*1.20*1.0)
-        //    = min3(22680/45.37, ...) ≈ min3(499.89, 1_190_167, 1_200_000) → 499.89 (bottleneck: USDTRY bid qty)
-        var liquidityCap = autoTrader.computeMinimumVolume(signal);
+        //    ≈ min3(499.89, 1_190_167, 1_200_000) → 499.89  (bottleneck: USDTRY bid qty)
+        var liquidityCap = autoTrader.calculateMaxVolume(signal);
         assertThat(liquidityCap).isCloseTo(499.89, offset(0.01));
 
         // ── computeLegs ───────────────────────────────────────────────────────
-        // volumes chained from order book prices (not FX rates):
-        //   leg1 SELL USDTRY: orderSize = 500 USD
-        //   leg2 BUY  EURTRY: 500 × bid(USDTRY)=45.36 / ask(EURTRY)=54.00 = 420 EUR
-        //   leg3 SELL EURUSD: same 420 EUR
+        // quantity = orderSize / baseRate(pair), same USD notional on every leg:
+        //   leg1 SELL USDTRY (base=USD): 500 / rate("USD") = 500 USD
+        //   leg2 BUY  EURTRY (base=EUR): 500 / rate("EUR") = 500/1.18 = 423.73 EUR
+        //   leg3 SELL EURUSD (base=EUR): 500 / rate("EUR") = 423.73 EUR
         var legs = (List<com.ib.arb.broker.OrderLeg>)
                 ReflectionTestUtils.invokeMethod(autoTrader, "computeLegs", signal, 500.0);
 
@@ -638,26 +643,32 @@ class AutoTraderTest {
         assertThat(leg1.pair()).isEqualTo("USDTRY");
         assertThat(leg1.direction()).isEqualTo("SELL");
         assertThat(leg1.price()).isEqualTo(45.36);
-        assertThat(leg1.volume()).isEqualTo(500.0);
+        assertThat(leg1.quantity()).isCloseTo(500.0, offset(0.01)); // 500 / rate("USD")=1.0
 
         var leg2 = legs.get(1);
         assertThat(leg2.legIndex()).isEqualTo(2);
         assertThat(leg2.pair()).isEqualTo("EURTRY");
         assertThat(leg2.direction()).isEqualTo("BUY");
         assertThat(leg2.price()).isEqualTo(54.00);
-        assertThat(leg2.volume()).isCloseTo(420.0, offset(0.01)); // 500 × 45.36 / 54.00
+        assertThat(leg2.quantity()).isCloseTo(423.73, offset(0.01)); // 500 / rate("EUR")=1.18
 
         var leg3 = legs.get(2);
         assertThat(leg3.legIndex()).isEqualTo(3);
         assertThat(leg3.pair()).isEqualTo("EURUSD");
         assertThat(leg3.direction()).isEqualTo("SELL");
         assertThat(leg3.price()).isEqualTo(1.20);
-        assertThat(leg3.volume()).isCloseTo(420.0, offset(0.01)); // same EUR amount as leg2
+        assertThat(leg3.quantity()).isCloseTo(423.73, offset(0.01)); // 500 / rate("EUR")=1.18
 
         // ── computePnlFromLegs ────────────────────────────────────────────────
-        // 500 USD → ×45.36 → 22680 TRY → ÷54.00 → 420 EUR → ×1.20 → 504 USD
-        // PnL = 504 - 500 = 4.0 USD
+        // Standard formula (quantity in base currency):
+        //   leg1 SELL USDTRY: USD −500,             TRY +500×45.36=+22680
+        //   leg2 BUY  EURTRY: EUR +423.73,          TRY −423.73×54=−22881
+        //   leg3 SELL EURUSD: EUR −423.73,          USD +423.73×1.20=+508.48
+        //   USD: −500+508.48=+8.48 × 1.0 = $8.48
+        //   TRY: 22680−22881=−201 × (1/45.37) = −$4.43
+        //   EUR: 0
+        //   PnL ≈ $4.04
         var pnl = (Double) ReflectionTestUtils.invokeMethod(autoTrader, "computePnlFromLegs", legs, 500.0);
-        assertThat(pnl).isEqualTo(4.0, offset(0.001));
+        assertThat(pnl).isCloseTo(4.0, offset(0.1));
     }
 }

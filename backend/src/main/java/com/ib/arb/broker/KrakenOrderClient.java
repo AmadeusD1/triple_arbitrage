@@ -172,9 +172,9 @@ public class KrakenOrderClient {
             var futures = legs.stream()
                 .map(l -> CompletableFuture.supplyAsync(() -> {
                     var krakenPair = KrakenOrderBookFeed.toKrakenSymbol(l.pair());
-                    var txid = sendOrder(krakenPair, l.direction().toLowerCase(), l.price(), l.volume());
+                    var txid = sendOrder(krakenPair, l.direction().toLowerCase(), l.price(), l.quantity());
                     return new LegResult(l.legIndex(), l.pair(), l.direction(),
-                        l.price(), l.volume(), txid.isPresent(), txid.orElse(null));
+                        l.price(), l.quantity(), txid.isPresent(), txid.orElse(null));
                 }))
                 .toList();
             return futures.stream()

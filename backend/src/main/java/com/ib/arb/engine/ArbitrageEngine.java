@@ -137,9 +137,12 @@ public class ArbitrageEngine {
         }
         if (!b1.isValid() || !b2.isValid() || !b3.isValid()) {
             var invalid = new ArrayList<String>();
-            if (!b1.isValid()) invalid.add(config.getPair1());
-            if (!b2.isValid()) invalid.add(config.getPair2());
-            if (!b3.isValid()) invalid.add(config.getPair3());
+            if (!b1.isValid()) invalid.add(String.format("%s(bid=%.5f bidQty=%.2f ask=%.5f askQty=%.2f)",
+                    config.getPair1(), b1.bid(), b1.bidQty(), b1.ask(), b1.askQty()));
+            if (!b2.isValid()) invalid.add(String.format("%s(bid=%.5f bidQty=%.2f ask=%.5f askQty=%.2f)",
+                    config.getPair2(), b2.bid(), b2.bidQty(), b2.ask(), b2.askQty()));
+            if (!b3.isValid()) invalid.add(String.format("%s(bid=%.5f bidQty=%.2f ask=%.5f askQty=%.2f)",
+                    config.getPair3(), b3.bid(), b3.bidQty(), b3.ask(), b3.askQty()));
             log.warn("[SCAN] Triangle={} — invalid snapshot for pair(s): {}", config.getId(), invalid);
             return Optional.empty();
         }
@@ -150,7 +153,7 @@ public class ArbitrageEngine {
         var edge = switch (cycle) {
             case BBS -> b3.bid() - b1.ask() * b2.ask();
             case BSS -> b2.bid() * b3.bid() - b1.ask();
-            case BSB -> 1.0 / b1.ask() * b2.bid() - b3.ask();
+            case BSB -> b2.bid() - b1.ask() * b3.ask();
             case SBS -> b1.bid() * b3.bid() - b2.ask();
         };
 

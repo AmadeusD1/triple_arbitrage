@@ -117,7 +117,7 @@ export interface OrderLeg {
   pair: string;
   direction: string;
   price: number;
-  volume: number;
+  quantity: number;
 }
 
 export interface BalanceEntry {
