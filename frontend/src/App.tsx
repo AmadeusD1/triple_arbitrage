@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { useDashboardSocket } from './hooks/useDashboardSocket';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
+import Analytics from './pages/Analytics';
 import OpenOrders from './pages/OpenOrders';
 import Positions from './pages/Positions';
 import CurrencyRates from './pages/CurrencyRates';
@@ -21,7 +22,7 @@ import Users from './pages/Users';
 
 const theme = createTheme({ palette: { mode: 'dark' } });
 
-const PAGES = ['/', '/trades', '/missed-opportunities', '/positions', '/open-orders', '/prices', '/currency-rates', '/settings', '/triangles', '/users'] as const;
+const PAGES = ['/', '/trades', '/missed-opportunities', '/positions', '/open-orders', '/analytics', '/prices', '/currency-rates', '/settings', '/triangles', '/users'] as const;
 
 // USER  → dashboard, trades, feeds only
 // QUANT → everything except /users
@@ -58,6 +59,7 @@ function NavBar() {
     { href: '/missed-opportunities',  label: 'Missed' },
     ...(canAccess(role, '/positions')    ? [{ href: '/positions',    label: 'Positions' }]        : []),
     ...(canAccess(role, '/open-orders')  ? [{ href: '/open-orders',  label: 'Open Orders' }]      : []),
+    ...(canAccess(role, '/analytics')   ? [{ href: '/analytics',    label: 'Analytics' }]          : []),
     { href: '/prices',                label: 'Feeds' },
     { href: '/currency-rates',        label: 'Currency Rates' },
     ...(canAccess(role, '/triangles')   ? [{ href: '/triangles',    label: 'Exchange Settings' }] : []),
@@ -96,6 +98,7 @@ function NavBar() {
               {nav('/missed-opportunities', 'Missed')}
               {canAccess(role, '/positions')   && nav('/positions',   'Positions')}
               {canAccess(role, '/open-orders') && nav('/open-orders', 'Open Orders')}
+              {canAccess(role, '/analytics')  && nav('/analytics',   'Analytics')}
             </Box>
             <Box sx={{ flex: 1 }} />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -159,13 +162,14 @@ function AppRoutes() {
         {path === '/missed-opportunities' && <MissedOpportunities rows={live?.recentMissedOpportunities ?? []} />}
         {path === '/positions'    && canAccess(role, path) && <Positions />}
         {path === '/open-orders'  && canAccess(role, path) && <OpenOrders />}
+        {path === '/analytics'   && canAccess(role, path) && <Analytics />}
         {path === '/prices'       && <Prices      prices={live?.prices ?? []} />}
         {path === '/currency-rates'     && <CurrencyRates     rates={live?.fxRates ?? {}} />}
         {path === '/settings'     && canAccess(role, path) && <Settings />}
         {path === '/triangles'    && canAccess(role, path) && <Triangles prices={live?.prices ?? []} />}
         {path === '/users'        && canAccess(role, path) && <Users />}
         {path !== '/trades' && path !== '/missed-opportunities' && path !== '/positions' &&
-         path !== '/open-orders' && path !== '/prices' && path !== '/currency-rates' &&
+         path !== '/open-orders' && path !== '/analytics' && path !== '/prices' && path !== '/currency-rates' &&
          path !== '/settings' && path !== '/triangles' && path !== '/users' && <Dashboard />}
       </Box>
     </Box>
