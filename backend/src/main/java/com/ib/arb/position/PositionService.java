@@ -17,55 +17,40 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-/**
- * Orchestrates exchange balance fetching and caching across all registered {@link PositionClient}s.
- *
- * <p>One {@link PositionClient} exists per supported exchange. This service handles cache TTL,
- * currency-key translation, and routing — keeping all exchange-specific HTTP logic in the clients.
- */
 @Service
 public class PositionService {
 
     private static final Logger log = LoggerFactory.getLogger(PositionService.class);
+
     @Value("${kraken.position-cache-ttl-ms:2000}")
     private long cacheTtlMs;
 
     private final List<PositionClient> clients;
     private final TriangleConfigRepository triangleRepo;
     private final SettingRepository settingRepo;
-    private final Map<Exchange, Map<String, Double>> balanceCache = new ConcurrentHashMap<>();
-    private final Map<Exchange, Long> lastRefreshed = new ConcurrentHashMap<>();
+    private final Map<Exchange, Map<String, Double>> balanceCache  = new ConcurrentHashMap<>();
+    private final Map<Exchange, Long>                lastRefreshed = new ConcurrentHashMap<>();
 
-    public PositionService(List<PositionClient> clients, TriangleConfigRepository triangleRepo, SettingRepository settingRepo) {
-        this.clients = clients;
+    public PositionService(List<PositionClient> clients, TriangleConfigRepository triangleRepo,
+                           SettingRepository settingRepo) {
+        this.clients     = clients;
         this.triangleRepo = triangleRepo;
-        this.settingRepo = settingRepo;
+        this.settingRepo  = settingRepo;
     }
 
     public boolean hasAvailableBalance(Exchange exchange, String isoCurrency, double requiredAmount) {
         if (isSimulation()) return true;
         if (isStale(exchange)) refreshBalances(exchange);
-        var balances = balanceCache.getOrDefault(exchange, Map.of());
+        var balances  = balanceCache.getOrDefault(exchange, Map.of());
         var available = balances.getOrDefault(toAssetKey(exchange, isoCurrency), 0.0);
-        var result = available >= requiredAmount;
-        log.debug("[Position] Balance check {} on {}: available={} required={} ok={}", isoCurrency, exchange, available, requiredAmount, result);
-        return result;
+        return available >= requiredAmount;
     }
 
     public double getAvailableAmount(Exchange exchange, String isoCurrency) {
         if (isSimulation()) return SIMULATION_BALANCE;
         if (isStale(exchange)) refreshBalances(exchange);
-        var balances = balanceCache.getOrDefault(exchange, Map.of());
         var key = toAssetKey(exchange, isoCurrency);
-        if (!balances.containsKey(key)) {
-            log.warn("[Position] Balance not found for {} on {} (key={})", isoCurrency, exchange, key);
-            return 0.0;
-        }
-        var amount = balances.get(key);
-        if (amount == 0.0) {
-            log.warn("[Position] Zero balance for {} on {}", isoCurrency, exchange);
-        }
-        return amount;
+        return balanceCache.getOrDefault(exchange, Map.of()).getOrDefault(key, 0.0);
     }
 
     @Scheduled(fixedDelayString = "${kraken.position-cache-ttl-ms:2000}")
@@ -74,7 +59,6 @@ public class PositionService {
     }
 
     public void refreshBalances(Exchange exchange) {
-        log.debug("[Position] Refreshing balances for {}", exchange);
         clients.stream()
             .filter(c -> c.getExchange() == exchange)
             .findFirst()
@@ -83,50 +67,34 @@ public class PositionService {
                 if (!fetched.isEmpty()) {
                     balanceCache.put(exchange, fetched);
                     lastRefreshed.put(exchange, System.currentTimeMillis());
-                    log.info("[Position] Balances refreshed for {} ({} entries)", exchange, fetched.size());
-                } else {
-                    log.warn("[Position] Empty balance response from {}", exchange);
+                    log.info("[Position] Refreshed {} ({} entries)", exchange, fetched.size());
                 }
             });
     }
 
-    /** Returns balances for currencies present in configured triangles. */
     public List<BalanceEntry> getBalances(Exchange exchange) {
         if (isStale(exchange)) refreshBalances(exchange);
-
         var relevantKeys = triangleRepo.findAll().stream()
             .flatMap(t -> List.of(t.getPair1(), t.getPair2(), t.getPair3()).stream())
             .flatMap(pair -> List.of(pair.substring(0, 3), pair.substring(3)).stream())
             .distinct()
             .map(iso -> toAssetKey(exchange, iso))
             .collect(Collectors.toSet());
-
         return balanceCache.getOrDefault(exchange, Map.of()).entrySet().stream()
             .filter(e -> e.getValue() > 0 && relevantKeys.contains(e.getKey()))
-            .map(e -> new BalanceEntry(
-                exchange.name(),
-                fromAssetKey(exchange, e.getKey()),
-                e.getKey(),
-                e.getValue()))
+            .map(e -> new BalanceEntry(exchange.name(), fromAssetKey(exchange, e.getKey()), e.getKey(), e.getValue()))
             .sorted(Comparator.comparing(BalanceEntry::currency))
             .toList();
     }
 
-    /** Returns open orders for all registered exchanges. */
     public List<PositionClient.OpenOrder> fetchOpenOrders() {
-        var orders = clients.stream()
-            .flatMap(c -> c.fetchOpenOrders().stream())
-            .toList();
-        log.info("[Position] Fetched {} open order(s) across {} exchange(s)", orders.size(), clients.size());
-        return orders;
+        return clients.stream().flatMap(c -> c.fetchOpenOrders().stream()).toList();
     }
 
-    public record BalanceEntry(String exchange, String currency, String krakenKey, double amount) {}
+    public record BalanceEntry(String exchange, String currency, String assetKey, double amount) {}
 
     private boolean isSimulation() {
-        return settingRepo.findById(SIMULATION_MODE_KEY)
-            .map(s -> s.getValue() == 1.0)
-            .orElse(true);
+        return settingRepo.findById(SIMULATION_MODE_KEY).map(s -> s.getValue() == 1.0).orElse(true);
     }
 
     private boolean isStale(Exchange exchange) {
@@ -135,12 +103,18 @@ public class PositionService {
     }
 
     private String toAssetKey(Exchange exchange, String iso) {
-        if (exchange == Exchange.KRAKEN) return "Z" + iso;
-        return iso;
+        return switch (exchange) {
+            case KRAKEN            -> "Z" + iso;
+            case BITSTAMP, HTX     -> iso.toLowerCase();
+            default                -> iso;
+        };
     }
 
     private String fromAssetKey(Exchange exchange, String key) {
-        if (exchange == Exchange.KRAKEN) return key.length() > 1 ? key.substring(1) : key;
-        return key;
+        return switch (exchange) {
+            case KRAKEN        -> key.length() > 1 ? key.substring(1) : key;
+            case BITSTAMP, HTX -> key.toUpperCase();
+            default            -> key;
+        };
     }
 }

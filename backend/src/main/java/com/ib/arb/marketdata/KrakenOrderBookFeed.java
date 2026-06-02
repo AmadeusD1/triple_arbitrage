@@ -11,8 +11,10 @@ import org.springframework.stereotype.Component;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -28,6 +30,10 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
     private String wsUrl;
 
     private final Map<String, OrderBook> snapshots = new ConcurrentHashMap<>();
+    // bids: highest price first; asks: lowest price first
+    private final Map<String, TreeMap<Double, Double>> bidBooks = new ConcurrentHashMap<>();
+    private final Map<String, TreeMap<Double, Double>> askBooks = new ConcurrentHashMap<>();
+
     private volatile boolean connected = false;
     private volatile List<String> subscribedPairs = List.of();
 
@@ -96,33 +102,45 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
 
             for (var entry : node.path("data")) {
                 var pair = toPair(entry.path("symbol").asText());
-                var current = snapshots.get(pair);
 
-                var bid    = bestPrice(entry.path("bids"), current != null ? current.bid() : 0);
-                var bidQty = bestQty(entry.path("bids"), current != null ? current.bidQty() : 0);
-                var ask    = bestPrice(entry.path("asks"), current != null ? current.ask() : 0);
-                var askQty = bestQty(entry.path("asks"), current != null ? current.askQty() : 0);
+                if ("snapshot".equals(type)) {
+                    var bidBook = new TreeMap<Double, Double>(Comparator.reverseOrder());
+                    var askBook = new TreeMap<Double, Double>();
+                    applyLevels(entry.path("bids"), bidBook);
+                    applyLevels(entry.path("asks"), askBook);
+                    bidBooks.put(pair, bidBook);
+                    askBooks.put(pair, askBook);
+                } else {
+                    var bidBook = bidBooks.computeIfAbsent(pair, k -> new TreeMap<>(Comparator.reverseOrder()));
+                    var askBook = askBooks.computeIfAbsent(pair, k -> new TreeMap<>());
+                    applyLevels(entry.path("bids"), bidBook);
+                    applyLevels(entry.path("asks"), askBook);
+                }
 
-                if (bid > 0 && ask > 0) {
-                    snapshots.put(pair, new OrderBook(pair, bid, bidQty, ask, askQty));
+                var bidBook = bidBooks.get(pair);
+                var askBook = askBooks.get(pair);
+                if (bidBook == null || askBook == null) continue;
+
+                var bestBid = bidBook.firstEntry();
+                var bestAsk = askBook.firstEntry();
+                if (bestBid != null && bestAsk != null) {
+                    snapshots.put(pair, new OrderBook(pair,
+                        bestBid.getKey(), bestBid.getValue(),
+                        bestAsk.getKey(), bestAsk.getValue()));
                 }
             }
         } catch (Exception ignored) {}
     }
 
-    private double bestPrice(JsonNode array, double fallback) {
-        if (array.isArray() && !array.isEmpty()) {
-            var price = array.get(0).path("price").asDouble();
-            if (price > 0) return price;
+    private void applyLevels(JsonNode array, TreeMap<Double, Double> book) {
+        if (!array.isArray()) return;
+        for (var level : array) {
+            double price = level.path("price").asDouble();
+            double qty   = level.path("qty").asDouble();
+            if (price <= 0) continue;
+            if (qty == 0) book.remove(price);
+            else book.put(price, qty);
         }
-        return fallback;
-    }
-
-    private double bestQty(JsonNode array, double fallback) {
-        if (array.isArray() && !array.isEmpty()) {
-            return array.get(0).path("qty").asDouble();
-        }
-        return fallback;
     }
 
     private String buildSubscribeMessage(List<String> krakenSymbols) {
@@ -164,6 +182,7 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
         @Override
         public void onOpen(WebSocket ws) {
             connected = true;
+            log.info("[KRAKEN] WebSocket connected");
             ws.sendText(buildSubscribeMessage(krakenSymbols), true);
             ws.request(1);
         }
@@ -181,11 +200,13 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
 
         @Override
         public void onError(WebSocket ws, Throwable error) {
+            log.warn("[KRAKEN] WebSocket error: {}", error.getMessage());
             scheduleReconnect();
         }
 
         @Override
         public CompletionStage<?> onClose(WebSocket ws, int statusCode, String reason) {
+            log.info("[KRAKEN] WebSocket closed: {} {}", statusCode, reason);
             scheduleReconnect();
             return null;
         }

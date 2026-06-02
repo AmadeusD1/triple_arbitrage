@@ -166,7 +166,7 @@ function AppRoutes() {
         {path === '/prices'       && <Prices      prices={live?.prices ?? []} />}
         {path === '/currency-rates'     && <CurrencyRates     rates={live?.fxRates ?? {}} />}
         {path === '/settings'     && canAccess(role, path) && <Settings />}
-        {path === '/triangles'    && canAccess(role, path) && <Triangles prices={live?.prices ?? []} />}
+        {path === '/triangles'    && canAccess(role, path) && <Triangles prices={live?.prices ?? []} exchangeRunning={live?.exchangeRunning ?? {}} />}
         {path === '/users'        && canAccess(role, path) && <Users />}
         {path !== '/trades' && path !== '/missed-opportunities' && path !== '/positions' &&
          path !== '/open-orders' && path !== '/analytics' && path !== '/prices' && path !== '/currency-rates' &&

@@ -77,6 +77,7 @@ export interface DashboardSnapshot {
   tradeInProgress: boolean;
   fxRates: Record<string, number>;
   recentMissedOpportunities: MissedOpportunity[];
+  exchangeRunning: Record<string, boolean>;
 }
 
 export interface EquityPoint {
@@ -123,8 +124,22 @@ export interface OrderLeg {
 export interface BalanceEntry {
   exchange: string;
   currency: string;
-  krakenKey: string;
+  assetKey: string;
   amount: number;
+}
+
+export interface ExchangeConfig {
+  id: number;
+  exchange: string;
+  enabled: boolean;
+  apiKey: string | null;
+  apiSecret: string | null;
+  apiPassphrase: string | null;
+  wsUrl: string | null;
+  orderSizeUsd: number;
+  positionLimitUsd: number;
+  maxDailyLossUsd: number;
+  createdAt: string;
 }
 
 export interface OpenOrder {

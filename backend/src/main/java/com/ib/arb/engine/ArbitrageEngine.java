@@ -1,5 +1,6 @@
 package com.ib.arb.engine;
 
+import com.ib.arb.marketdata.Exchange;
 import com.ib.arb.marketdata.OrderBookFeed;
 import com.ib.arb.marketdata.PriceSnapshot;
 import com.ib.arb.model.TriangleConfig;
@@ -18,15 +19,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 
-/**
- * Scans all registered exchange feeds for triangular arbitrage opportunities.
- *
- * <p>Triangles are loaded from the database on each {@link #scan()} call, so activating
- * or deactivating a triangle takes effect within the next scan cycle without a restart.
- *
- * <p>All order-book reads are non-blocking — snapshots are pulled from the in-memory
- * state maintained by each {@link OrderBookFeed}.
- */
 @Service
 public class ArbitrageEngine {
 
@@ -41,15 +33,18 @@ public class ArbitrageEngine {
     }
 
     /**
-     * Returns the deduplicated set of FX pairs referenced by any configured triangle,
-     * regardless of active status.
-     *
-     * <p>Used by {@code FeedStartup} to subscribe the order book feeds to exactly
-     * the pairs that may ever be scanned. Subscribing all pairs (not just active ones)
-     * means activating a triangle never requires a restart.
-     *
-     * @return list of pair codes (e.g. {@code "EURUSD"}), no duplicates
+     * Returns all FX pairs referenced by triangles of the given exchange.
+     * Used by {@code FeedStartup} and {@code ExchangeManager} to subscribe feeds.
      */
+    public List<String> pairsForExchange(Exchange exchange) {
+        return triangleRepo.findAll().stream()
+            .filter(t -> exchange.name().equalsIgnoreCase(t.getExchange()))
+            .flatMap(t -> List.of(t.getPair1(), t.getPair2(), t.getPair3()).stream())
+            .distinct()
+            .toList();
+    }
+
+    /** All pairs across all exchanges (used for initial feed subscription on startup). */
     public List<String> allPairs() {
         return triangleRepo.findAll().stream()
             .flatMap(t -> List.of(t.getPair1(), t.getPair2(), t.getPair3()).stream())
@@ -57,10 +52,7 @@ public class ArbitrageEngine {
             .toList();
     }
 
-    /**
-     * Returns a current bid/ask snapshot for every configured pair across all feeds.
-     * Pairs with no valid snapshot (feed not yet connected) are omitted.
-     */
+    /** Live bid/ask snapshots for all configured pairs across all connected feeds. */
     public List<PriceSnapshot> currentSnapshots() {
         var pairs = triangleRepo.findAll().stream()
             .flatMap(t -> Stream.of(t.getPair1(), t.getPair2(), t.getPair3()))
@@ -77,52 +69,43 @@ public class ArbitrageEngine {
     }
 
     /**
-     * Scans every registered feed against all active triangles and returns the
-     * highest-profit signal found, or empty if no opportunity exceeds its threshold.
-     *
-     * @return the best {@link Signal} across all exchanges and triangles, or
-     *         {@link Optional#empty()} if no profitable opportunity exists
+     * Scans active triangles for the given exchange and returns the highest-profit signal,
+     * or empty if no opportunity exceeds its threshold.
      */
-    public Optional<Signal> scanForOpportunities() {
-        var active = triangleRepo.findByStatus(ACTIVE);
-        log.debug("[SCAN] Starting — {} active triangle(s) on {} feed(s)", active.size(), feeds.size());
+    public Optional<Signal> scanForOpportunities(Exchange exchange) {
+        var active = triangleRepo.findByStatus(ACTIVE).stream()
+            .filter(t -> exchange.name().equalsIgnoreCase(t.getExchange()))
+            .toList();
 
-        var best = feeds.stream()
-            .flatMap(feed -> active.stream()
-                .map(config -> computeEdge(feed, config))
-                .filter(Optional::isPresent)
-                .map(Optional::get))
+        var feed = feeds.stream()
+            .filter(f -> f.getExchange() == exchange)
+            .findFirst()
+            .orElse(null);
+
+        if (feed == null) {
+            log.debug("[SCAN] No feed registered for {}", exchange);
+            return Optional.empty();
+        }
+
+        log.debug("[SCAN] {} — {} active triangle(s)", exchange, active.size());
+
+        var best = active.stream()
+            .map(config -> computeEdge(feed, config))
+            .filter(Optional::isPresent)
+            .map(Optional::get)
             .max(Comparator.comparingDouble(Signal::profit));
 
-        if (best.isEmpty()) {
-            log.debug("[SCAN] No profitable opportunity found");
-        } else {
+        if (best.isPresent()) {
             var s = best.get();
-            log.info("[SCAN] Best signal — triangle={} exchange={} cycle={} edge={}",
-                s.config().getId(), s.exchange(), s.cycle(), String.format("%.5f", s.profit()));
+            log.info("[SCAN] {} best signal — triangle={} cycle={} edge={}",
+                exchange, s.config().getId(), s.cycle(), String.format("%.5f", s.profit()));
+        } else {
+            log.debug("[SCAN] {} — no profitable opportunity", exchange);
         }
         return best;
     }
 
-    /**
-     * Evaluates both cycle directions for a single triangle on a single feed.
-     *
-     * <ul>
-     *   <li><b>Cycle A</b>: edge = {@code bid1 × bid2 − ask3}</li>
-     *   <li><b>Cycle B</b>: edge = {@code bid3 − ask1 × ask2}</li>
-     * </ul>
-     *
-     * <p>Returns empty if the feed's exchange doesn't match the triangle's exchange,
-     * any snapshot is missing or invalid, or neither edge exceeds the triangle's
-     * {@code minProfitPercent} threshold.
-     */
     private Optional<Signal> computeEdge(OrderBookFeed feed, TriangleConfig config) {
-        if (!feed.getExchange().name().equalsIgnoreCase(config.getExchange())) {
-            log.debug("[SCAN] Skipping triangle={} — exchange mismatch ({} vs {})",
-                config.getId(), feed.getExchange().name(), config.getExchange());
-            return Optional.empty();
-        }
-
         var b1 = feed.getSnapshot(config.getPair1());
         var b2 = feed.getSnapshot(config.getPair2());
         var b3 = feed.getSnapshot(config.getPair3());
@@ -136,14 +119,7 @@ public class ArbitrageEngine {
             return Optional.empty();
         }
         if (!b1.isValid() || !b2.isValid() || !b3.isValid()) {
-            var invalid = new ArrayList<String>();
-            if (!b1.isValid()) invalid.add(String.format("%s(bid=%.5f bidQty=%.2f ask=%.5f askQty=%.2f)",
-                    config.getPair1(), b1.bid(), b1.bidQty(), b1.ask(), b1.askQty()));
-            if (!b2.isValid()) invalid.add(String.format("%s(bid=%.5f bidQty=%.2f ask=%.5f askQty=%.2f)",
-                    config.getPair2(), b2.bid(), b2.bidQty(), b2.ask(), b2.askQty()));
-            if (!b3.isValid()) invalid.add(String.format("%s(bid=%.5f bidQty=%.2f ask=%.5f askQty=%.2f)",
-                    config.getPair3(), b3.bid(), b3.bidQty(), b3.ask(), b3.askQty()));
-            log.warn("[SCAN] Triangle={} — invalid snapshot for pair(s): {}", config.getId(), invalid);
+            log.warn("[SCAN] Triangle={} — invalid snapshot(s)", config.getId());
             return Optional.empty();
         }
 
@@ -158,13 +134,9 @@ public class ArbitrageEngine {
         };
 
         if (edge > 0 && edge > threshold) {
-            log.debug("[SCAN] Triangle={} cycle={} edge={} — PROFITABLE (threshold={})",
-                config.getId(), cycle, String.format("%.5f", edge), threshold);
+            log.debug("[SCAN] Triangle={} cycle={} edge={} — PROFITABLE", config.getId(), cycle, String.format("%.5f", edge));
             return Optional.of(new Signal(feed.getExchange(), config, cycle, edge, b1, b2, b3));
         }
-
-        log.debug("[SCAN] Triangle={} cycle={} edge={} — below threshold {}",
-            config.getId(), cycle, String.format("%.5f", edge), threshold);
         return Optional.empty();
     }
 }

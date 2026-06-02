@@ -19,6 +19,7 @@ import java.util.Map;
  * @param tradeInProgress           {@code true} while a live order combo is being placed
  * @param fxRates                   latest USD rates from the currency aggregator feed
  * @param recentMissedOpportunities last 1000 missed opportunities ordered by time descending
+ * @param exchangeRunning           per-exchange scan loop running state (exchange name → boolean)
  */
 public record DashboardSnapshot(
     double dailyProfitAndLoss,
@@ -28,5 +29,6 @@ public record DashboardSnapshot(
     List<PriceSnapshot> prices,
     boolean tradeInProgress,
     Map<String, Double> fxRates,
-    List<MissedOpportunity> recentMissedOpportunities
+    List<MissedOpportunity> recentMissedOpportunities,
+    Map<String, Boolean> exchangeRunning
 ) {}

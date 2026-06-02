@@ -2,8 +2,9 @@ package com.ib.arb.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ib.arb.analytics.AnalyticsService;
-import com.ib.arb.broker.KrakenOrderClient;
+import com.ib.arb.broker.OrderClient;
 import com.ib.arb.engine.AutoTrader;
+import com.ib.arb.engine.ExchangeManager;
 import com.ib.arb.marketdata.CurrencyRateFeed;
 import com.ib.arb.repository.MissedOpportunityRepository;
 import com.ib.arb.repository.TradeRepository;
@@ -14,6 +15,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 
@@ -25,37 +27,39 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
     private volatile String lastPayload = null;
 
     private final AnalyticsService analytics;
-    private final KrakenOrderClient broker;
+    private final List<OrderClient> orderClients;
     private final TradeRepository tradeRepo;
     private final ArbitrageEngine arbitrageEngine;
     private final CurrencyRateFeed currencyRateFeed;
     private final AutoTrader autoTrader;
     private final MissedOpportunityRepository missedOpportunityRepo;
+    private final ExchangeManager exchangeManager;
 
     public DashboardWebSocketHandler(AnalyticsService analytics,
-                                     KrakenOrderClient broker,
+                                     List<OrderClient> orderClients,
                                      TradeRepository tradeRepo,
                                      ArbitrageEngine arbitrageEngine,
                                      CurrencyRateFeed currencyRateFeed,
                                      AutoTrader autoTrader,
                                      MissedOpportunityRepository missedOpportunityRepo,
+                                     ExchangeManager exchangeManager,
                                      ObjectMapper mapper) {
-        this.analytics = analytics;
-        this.broker = broker;
-        this.tradeRepo = tradeRepo;
-        this.arbitrageEngine = arbitrageEngine;
-        this.currencyRateFeed = currencyRateFeed;
-        this.autoTrader = autoTrader;
+        this.analytics          = analytics;
+        this.orderClients       = orderClients;
+        this.tradeRepo          = tradeRepo;
+        this.arbitrageEngine    = arbitrageEngine;
+        this.currencyRateFeed   = currencyRateFeed;
+        this.autoTrader         = autoTrader;
         this.missedOpportunityRepo = missedOpportunityRepo;
-        this.mapper = mapper;
+        this.exchangeManager    = exchangeManager;
+        this.mapper             = mapper;
     }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         sessions.add(session);
         if (lastPayload != null) {
-            try { session.sendMessage(new TextMessage(lastPayload)); }
-            catch (Exception ignored) {}
+            try { session.sendMessage(new TextMessage(lastPayload)); } catch (Exception ignored) {}
         }
     }
 
@@ -65,15 +69,17 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
     }
 
     public void broadcast() {
+        var anyConnected = orderClients.stream().anyMatch(OrderClient::isConnected);
         send(new DashboardSnapshot(
             analytics.dailyProfitAndLoss(),
-            broker.isConnected(),
+            anyConnected,
             autoTrader.getStats(),
             tradeRepo.findTop20ByOrderByTimeDesc(),
             arbitrageEngine.currentSnapshots(),
             autoTrader.isExecuting(),
             currencyRateFeed.getAllRates(),
-            missedOpportunityRepo.findTop1000ByOrderByTimeDesc()
+            missedOpportunityRepo.findTop1000ByOrderByTimeDesc(),
+            exchangeManager.exchangeRunningStates()
         ));
     }
 

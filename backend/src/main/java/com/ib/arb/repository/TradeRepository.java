@@ -21,6 +21,9 @@ public interface TradeRepository extends JpaRepository<Trade, Long> {
     @Query("SELECT SUM(t.pnl) FROM Trade t WHERE t.time >= :since")
     Double sumPnlSince(@Param("since") LocalDateTime since);
 
+    @Query("SELECT SUM(t.pnl) FROM Trade t WHERE t.time >= :since AND t.exchange = :exchange")
+    Double sumPnlSinceForExchange(@Param("since") LocalDateTime since, @Param("exchange") String exchange);
+
     @Query("SELECT t FROM Trade t LEFT JOIN FETCH t.legs WHERE t.id = :id")
     Optional<Trade> findByIdWithLegs(@Param("id") Long id);
 
