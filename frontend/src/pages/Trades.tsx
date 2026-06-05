@@ -126,6 +126,7 @@ export default function Trades() {
             <TableHead>
               <TableRow>
                 <TableCell>Time</TableCell>
+                <TableCell>Exchange</TableCell>
                 <TableCell>Dir</TableCell>
                 <TableCell align="right">Spread</TableCell>
                 <TableCell align="right">PnL</TableCell>
@@ -140,6 +141,7 @@ export default function Trades() {
                 <TableRow key={t.id} hover sx={{ cursor: 'pointer' }}
                   onClick={() => setSelectedTradeId(t.id)}>
                   <TableCell>{new Date(t.time + 'Z').toLocaleString()}</TableCell>
+                  <TableCell>{t.exchange}</TableCell>
                   <TableCell>{t.direction}</TableCell>
                   <TableCell align="right">{t.spread.toFixed(5)}</TableCell>
                   <TableCell align="right" sx={{ color: t.pnl >= 0 ? 'success.main' : 'error.main' }}>
@@ -159,7 +161,7 @@ export default function Trades() {
               ))}
               {trades.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3, color: 'text.secondary' }}>
                     No trades yet
                   </TableCell>
                 </TableRow>

@@ -11,4 +11,7 @@ public interface OrderBookFeed {
     void subscribe(List<String> pairs);
 
     boolean isConnected();
+
+    /** Closes the WebSocket and stops automatic reconnection. */
+    default void disconnect() {}
 }

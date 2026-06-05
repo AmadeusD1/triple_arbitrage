@@ -2,8 +2,7 @@ package com.ib.arb.position;
 
 import com.ib.arb.marketdata.Exchange;
 import static com.ib.arb.common.Constants.Simulation.SIMULATION_BALANCE;
-import static com.ib.arb.common.Constants.Simulation.SIMULATION_MODE_KEY;
-import com.ib.arb.repository.SettingRepository;
+import com.ib.arb.repository.ExchangeConfigRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,19 +26,19 @@ public class PositionService {
 
     private final List<PositionClient> clients;
     private final TriangleConfigRepository triangleRepo;
-    private final SettingRepository settingRepo;
+    private final ExchangeConfigRepository exchangeConfigRepo;
     private final Map<Exchange, Map<String, Double>> balanceCache  = new ConcurrentHashMap<>();
     private final Map<Exchange, Long>                lastRefreshed = new ConcurrentHashMap<>();
 
     public PositionService(List<PositionClient> clients, TriangleConfigRepository triangleRepo,
-                           SettingRepository settingRepo) {
-        this.clients     = clients;
-        this.triangleRepo = triangleRepo;
-        this.settingRepo  = settingRepo;
+                           ExchangeConfigRepository exchangeConfigRepo) {
+        this.clients            = clients;
+        this.triangleRepo       = triangleRepo;
+        this.exchangeConfigRepo = exchangeConfigRepo;
     }
 
     public boolean hasAvailableBalance(Exchange exchange, String isoCurrency, double requiredAmount) {
-        if (isSimulation()) return true;
+        if (isSimulation(exchange)) return true;
         if (isStale(exchange)) refreshBalances(exchange);
         var balances  = balanceCache.getOrDefault(exchange, Map.of());
         var available = balances.getOrDefault(toAssetKey(exchange, isoCurrency), 0.0);
@@ -47,7 +46,7 @@ public class PositionService {
     }
 
     public double getAvailableAmount(Exchange exchange, String isoCurrency) {
-        if (isSimulation()) return SIMULATION_BALANCE;
+        if (isSimulation(exchange)) return SIMULATION_BALANCE;
         if (isStale(exchange)) refreshBalances(exchange);
         var key = toAssetKey(exchange, isoCurrency);
         return balanceCache.getOrDefault(exchange, Map.of()).getOrDefault(key, 0.0);
@@ -55,7 +54,12 @@ public class PositionService {
 
     @Scheduled(fixedDelayString = "${kraken.position-cache-ttl-ms:2000}")
     public void scheduledRefresh() {
-        clients.forEach(c -> refreshBalances(c.getExchange()));
+        clients.stream()
+            .filter(c -> {
+                var cfg = exchangeConfigRepo.findByExchange(c.getExchange().name()).orElse(null);
+                return cfg != null && cfg.isEnabled() && !cfg.isSimulation();
+            })
+            .forEach(c -> refreshBalances(c.getExchange()));
     }
 
     public void refreshBalances(Exchange exchange) {
@@ -88,13 +92,21 @@ public class PositionService {
     }
 
     public List<PositionClient.OpenOrder> fetchOpenOrders() {
-        return clients.stream().flatMap(c -> c.fetchOpenOrders().stream()).toList();
+        return clients.stream()
+            .filter(c -> {
+                var cfg = exchangeConfigRepo.findByExchange(c.getExchange().name()).orElse(null);
+                return cfg != null && cfg.isEnabled() && !cfg.isSimulation();
+            })
+            .flatMap(c -> c.fetchOpenOrders().stream())
+            .toList();
     }
 
     public record BalanceEntry(String exchange, String currency, String assetKey, double amount) {}
 
-    private boolean isSimulation() {
-        return settingRepo.findById(SIMULATION_MODE_KEY).map(s -> s.getValue() == 1.0).orElse(true);
+    private boolean isSimulation(Exchange exchange) {
+        return exchangeConfigRepo.findByExchange(exchange.name())
+            .map(c -> c.isSimulation())
+            .orElse(true);
     }
 
     private boolean isStale(Exchange exchange) {
@@ -104,9 +116,10 @@ public class PositionService {
 
     private String toAssetKey(Exchange exchange, String iso) {
         return switch (exchange) {
-            case KRAKEN            -> "Z" + iso;
-            case BITSTAMP, HTX     -> iso.toLowerCase();
-            default                -> iso;
+            case KRAKEN   -> "Z" + iso;
+            case BITSTAMP -> iso.toLowerCase();
+            case HTX      -> "USD".equals(iso) ? "usdt" : iso.toLowerCase();
+            default       -> iso;
         };
     }
 

@@ -21,7 +21,6 @@ client.interceptors.response.use(
 interface DailyPnlResponse { dailyProfitAndLoss: number }
 interface DrawdownResponse  { drawdown: number }
 interface WinRateResponse   { winRate: number }
-interface SharpeResponse    { sharpe: number }
 interface ArbitrageStatus   { running: boolean; stats: ArbitrageStats }
 interface BrokerHealth      { connected: boolean }
 
@@ -38,9 +37,9 @@ export const getStatus             = (): Promise<AxiosResponse<ArbitrageStatus>>
 export const getDailyProfitAndLoss = (): Promise<AxiosResponse<DailyPnlResponse>>  => client.get('/stats/daily-pnl');
 export const getDrawdown           = (): Promise<AxiosResponse<DrawdownResponse>>   => client.get('/stats/drawdown');
 export const getWinRate            = (): Promise<AxiosResponse<WinRateResponse>>    => client.get('/stats/win-rate');
-export const getSharpe             = (): Promise<AxiosResponse<SharpeResponse>>     => client.get('/stats/sharpe');
+export const getMonthlyPnl         = (): Promise<AxiosResponse<{ monthlyPnl: number }>> => client.get('/stats/monthly-pnl');
 export const getArbStats           = (): Promise<AxiosResponse<ArbitrageStats>>     => client.get('/stats/arb');
-export const getEquity             = (): Promise<AxiosResponse<EquityPoint[]>>      => client.get('/stats/equity');
+export const getEquity             = (status = 'ALL'): Promise<AxiosResponse<EquityPoint[]>> => client.get('/stats/equity', { params: { status } });
 export const getExecution          = (): Promise<AxiosResponse<ExecutionStats>>     => client.get('/stats/execution');
 export const getTrades             = (): Promise<AxiosResponse<Trade[]>>            => client.get('/trades');
 export const getTrade              = (id: number): Promise<AxiosResponse<TradeDetail>> => client.get(`/trades/${id}`);

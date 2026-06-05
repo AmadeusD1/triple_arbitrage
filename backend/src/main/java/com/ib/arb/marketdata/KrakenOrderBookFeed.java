@@ -20,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class KrakenOrderBookFeed implements OrderBookFeed {
@@ -35,7 +36,10 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
     private final Map<String, TreeMap<Double, Double>> askBooks = new ConcurrentHashMap<>();
 
     private volatile boolean connected = false;
+    private volatile boolean stopped = false;
     private volatile List<String> subscribedPairs = List.of();
+    private volatile WebSocket activeWs = null;
+    private final AtomicBoolean connecting = new AtomicBoolean(false);
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newHttpClient();
@@ -53,8 +57,23 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
 
     @Override
     public void subscribe(List<String> pairs) {
+        stopped = false;
         this.subscribedPairs = pairs;
         connect();
+    }
+
+    @Override
+    public void disconnect() {
+        stopped = true;
+        connected = false;
+        connecting.set(false);
+        var ws = activeWs;
+        activeWs = null;
+        if (ws != null) try { ws.abort(); } catch (Exception ignored) {}
+        snapshots.clear();
+        bidBooks.clear();
+        askBooks.clear();
+        log.info("[KRAKEN] Feed disconnected");
     }
 
     @Override
@@ -63,6 +82,7 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
     }
 
     private void connect() {
+        if (!connecting.compareAndSet(false, true)) return;
         var krakenSymbols = subscribedPairs.stream()
             .map(KrakenOrderBookFeed::toKrakenSymbol)
             .toList();
@@ -71,16 +91,18 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
             httpClient.newWebSocketBuilder()
                 .buildAsync(URI.create(wsUrl), new Listener(krakenSymbols))
                 .whenComplete((ws, ex) -> {
+                    connecting.set(false);
                     if (ex != null) scheduleReconnect();
                 });
         } catch (Exception e) {
+            connecting.set(false);
             scheduleReconnect();
         }
     }
 
     private void scheduleReconnect() {
         connected = false;
-        reconnectScheduler.schedule(this::connect, 2, TimeUnit.SECONDS);
+        if (!stopped) reconnectScheduler.schedule(this::connect, 2, TimeUnit.SECONDS);
     }
 
     private void handleMessage(String json) {
@@ -182,6 +204,7 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
         @Override
         public void onOpen(WebSocket ws) {
             connected = true;
+            activeWs = ws;
             log.info("[KRAKEN] WebSocket connected");
             ws.sendText(buildSubscribeMessage(krakenSymbols), true);
             ws.request(1);

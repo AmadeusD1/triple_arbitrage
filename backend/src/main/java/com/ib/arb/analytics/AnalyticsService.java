@@ -70,24 +70,14 @@ public class AnalyticsService {
     }
 
     /**
-     * Returns the annualised Sharpe ratio: {@code (mean / stdDev) × √252}.
+     * Returns the sum of {@code pnl} for all trades since the first day of the current calendar month (UTC).
      *
-     * <p>The factor of √252 scales a per-trade ratio to an annual figure, assuming
-     * 252 trading days per year. A value above {@code 1.0} is generally considered
-     * acceptable; above {@code 2.0} is good.
-     *
-     * @return annualised Sharpe ratio; {@code 0.0} if there are no trades or all trades
-     *         have identical P&amp;L (zero standard deviation)
+     * @return total profit/loss in USD for the current month; {@code 0.0} if no trades exist
      */
-    public double sharpe() {
-        var pnls = trades.findAll().stream().mapToDouble(t -> t.getPnl()).toArray();
-        if (pnls.length == 0) return 0.0;
-
-        var mean = mean(pnls);
-        var std = std(pnls, mean);
-        if (std == 0) return 0.0;
-
-        return (mean / std) * Math.sqrt(252);
+    public double monthlyPnl() {
+        var startOfMonth = LocalDateTime.now().toLocalDate().withDayOfMonth(1).atStartOfDay();
+        var sum = trades.sumPnlSince(startOfMonth);
+        return sum != null ? sum : 0.0;
     }
 
     /**
@@ -99,27 +89,17 @@ public class AnalyticsService {
      *
      * @return list of {@link EquityPoint} in chronological order; empty if no trades exist
      */
-    public List<EquityPoint> equityCurve() {
+    public List<EquityPoint> equityCurve(String status) {
         var all = trades.findAll();
         double cumulative = 0;
         var result = new java.util.ArrayList<EquityPoint>();
         for (var t : all) {
+            if (status != null && !status.isBlank() && !status.equalsIgnoreCase("ALL")
+                    && !status.equalsIgnoreCase(t.getStatus())) continue;
             cumulative += t.getPnl();
             result.add(new EquityPoint(t.getTime().toString(), cumulative));
         }
         return result;
-    }
-
-    private double mean(double[] values) {
-        double sum = 0;
-        for (var v : values) sum += v;
-        return sum / values.length;
-    }
-
-    private double std(double[] values, double mean) {
-        double sum = 0;
-        for (var v : values) sum += Math.pow(v - mean, 2);
-        return Math.sqrt(sum / values.length);
     }
 
     /**

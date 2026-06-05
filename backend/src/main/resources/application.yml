@@ -19,10 +19,10 @@ kraken:
   position-cache-ttl-ms: 2000
 
 currency:
-  feed-url: ${CURRENCY_FEED_URL:ws://136.244.86.163:8080/api/ws/global}
+  feed-url: ${CURRENCY_FEED_URL:}
   layer:
     api-key: ${CURRENCY_LAYER_API_KEY:e31dcd26cbbffa7b035150766e41ddb6}
-    poll-interval-ms: 2000
+    poll-interval-ms: 60000
 
 alert:
   email-from: ${ALERT_EMAIL_FROM:}

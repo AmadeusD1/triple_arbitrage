@@ -12,8 +12,10 @@ import java.util.concurrent.atomic.AtomicLong;
 /** Kraken HMAC-SHA512 request signing shared by order and position clients. */
 public final class KrakenAuth {
 
-    /** Shared monotonically increasing nonce counter — all callers use the same API key. */
-    private static final AtomicLong NONCE = new AtomicLong(System.currentTimeMillis());
+    /** Shared monotonically increasing nonce counter — all callers use the same API key.
+     *  Using microsecond-scale values (ms * 1000) ensures each restart starts well above
+     *  where the previous run left off, preventing EAPI:Invalid nonce after restarts. */
+    private static final AtomicLong NONCE = new AtomicLong(System.currentTimeMillis() * 1000L);
 
     private KrakenAuth() {}
 

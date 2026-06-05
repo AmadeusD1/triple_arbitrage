@@ -8,9 +8,15 @@ import type { Trade, TradeStatus } from '../types';
 
 type DirectionFilter = Trade['direction'] | 'ALL';
 type StatusFilter = TradeStatus | 'ALL';
+type ExchangeFilter = string;
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// Clock face emojis indexed by hour 0-23 (0 = 🕛 12:00, 1 = 🕐 1:00, …)
+const CLOCK_EMOJIS = Array.from({ length: 24 }, (_, h) => {
+  const h12 = h % 12;
+  return h12 === 0 ? '\u{1F55B}' : String.fromCodePoint(0x1F54F + h12);
+});
 
 function dayIndex(d: Date): number {
   return (d.getDay() + 6) % 7; // 0=Mon … 6=Sun
@@ -22,16 +28,33 @@ export default function Analytics() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [status, setStatus] = useState<StatusFilter>('ALL');
   const [direction, setDirection] = useState<DirectionFilter>('ALL');
+  const [exchange, setExchange] = useState<ExchangeFilter>('ALL');
+
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     void getTrades().then((r) => setTrades(r.data));
   }, []);
 
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const currentDay  = dayIndex(now);
+  const currentHour = now.getHours();
+
+  const exchanges = useMemo(() => {
+    const s = new Set(trades.map((t) => t.exchange));
+    return Array.from(s).sort();
+  }, [trades]);
+
   const filtered = useMemo(() => trades.filter((t) => {
     if (status !== 'ALL' && t.status !== status) return false;
     if (direction !== 'ALL' && t.direction !== direction) return false;
+    if (exchange !== 'ALL' && t.exchange !== exchange) return false;
     return true;
-  }), [trades, status, direction]);
+  }), [trades, status, direction, exchange]);
 
   const matrix = useMemo(() => {
     const m: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
@@ -111,6 +134,19 @@ export default function Analytics() {
             <MenuItem value="SBS">SBS</MenuItem>
           </Select>
         </FormControl>
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel>Exchange</InputLabel>
+          <Select
+            label="Exchange"
+            value={exchange}
+            onChange={(e) => setExchange(e.target.value as ExchangeFilter)}
+          >
+            <MenuItem value="ALL">All</MenuItem>
+            {exchanges.map((ex) => (
+              <MenuItem key={ex} value={ex}>{ex}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Box>
 
       <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
@@ -153,6 +189,7 @@ export default function Analytics() {
                 <Box key={day} sx={{ display: 'flex', gap: 0.5, mb: 0.5 }}>
                   {HOURS.map((h) => {
                     const count = matrix[di][h];
+                    const isNow = di === currentDay && h === currentHour;
                     return (
                       <Tooltip
                         key={h}
@@ -164,9 +201,20 @@ export default function Analytics() {
                           width: 24, height: 24, borderRadius: '3px',
                           bgcolor: cellColor(count),
                           cursor: 'default',
+                          position: 'relative',
                           transition: 'transform 0.1s',
-                          '&:hover': { transform: 'scale(1.3)', zIndex: 2, position: 'relative' },
-                        }} />
+                          '&:hover': { transform: 'scale(1.3)', zIndex: 2 },
+                        }}>
+                          {isNow && (
+                            <Box sx={{
+                              position: 'absolute', inset: 0,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: '0.7rem', lineHeight: 1, pointerEvents: 'none',
+                            }}>
+                              {CLOCK_EMOJIS[h]}
+                            </Box>
+                          )}
+                        </Box>
                       </Tooltip>
                     );
                   })}
@@ -229,6 +277,7 @@ export default function Analytics() {
                   {HOURS.map((h) => {
                     const pnl = pnlMatrix[di][h];
                     const sign = pnl >= 0 ? '+' : '';
+                    const isNow = di === currentDay && h === currentHour;
                     return (
                       <Tooltip
                         key={h}
@@ -240,9 +289,20 @@ export default function Analytics() {
                           width: 24, height: 24, borderRadius: '3px',
                           bgcolor: pnlCellColor(pnl),
                           cursor: 'default',
+                          position: 'relative',
                           transition: 'transform 0.1s',
-                          '&:hover': { transform: 'scale(1.3)', zIndex: 2, position: 'relative' },
-                        }} />
+                          '&:hover': { transform: 'scale(1.3)', zIndex: 2 },
+                        }}>
+                          {isNow && (
+                            <Box sx={{
+                              position: 'absolute', inset: 0,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: '0.7rem', lineHeight: 1, pointerEvents: 'none',
+                            }}>
+                              {CLOCK_EMOJIS[h]}
+                            </Box>
+                          )}
+                        </Box>
                       </Tooltip>
                     );
                   })}

@@ -7,6 +7,7 @@ import static com.ib.arb.common.Constants.TradeStatus.FILLED;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -42,9 +43,9 @@ public class StatsController {
         return ResponseEntity.ok(Map.of("winRate", analytics.winRate()));
     }
 
-    @GetMapping("/sharpe")
-    public ResponseEntity<Map<String, Double>> sharpe() {
-        return ResponseEntity.ok(Map.of("sharpe", analytics.sharpe()));
+    @GetMapping("/monthly-pnl")
+    public ResponseEntity<Map<String, Double>> monthlyPnl() {
+        return ResponseEntity.ok(Map.of("monthlyPnl", analytics.monthlyPnl()));
     }
 
     @GetMapping("/arb")
@@ -72,7 +73,8 @@ public class StatsController {
     }
 
     @GetMapping("/equity")
-    public ResponseEntity<List<AnalyticsService.EquityPoint>> equity() {
-        return ResponseEntity.ok(analytics.equityCurve());
+    public ResponseEntity<List<AnalyticsService.EquityPoint>> equity(
+            @RequestParam(defaultValue = "ALL") String status) {
+        return ResponseEntity.ok(analytics.equityCurve(status));
     }
 }

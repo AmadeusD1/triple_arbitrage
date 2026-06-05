@@ -101,6 +101,9 @@ public class ExchangeManager {
             future.cancel(false);
             log.info("[EM] Stopped scan loop for {}", exchange);
         }
+        feeds.stream()
+            .filter(f -> f.getExchange() == exchange)
+            .forEach(OrderBookFeed::disconnect);
     }
 
     public boolean isRunning(Exchange exchange) {
@@ -163,6 +166,7 @@ public class ExchangeManager {
         feeds.stream()
             .filter(f -> f.getExchange() == exchange)
             .forEach(f -> {
+                if (f.isConnected()) return;
                 f.subscribe(pairs);
                 log.info("[EM] Subscribed {} feed to {} pair(s)", exchange, pairs.size());
             });

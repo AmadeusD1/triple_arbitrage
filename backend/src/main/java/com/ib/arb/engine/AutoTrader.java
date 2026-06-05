@@ -242,9 +242,10 @@ public class AutoTrader {
         for (int i = 0; i < 3; i++) {
             var pair  = pairs[i];
             var isBuy = BUY.equals(dirs[i]);
-            var ccy   = isBuy ? pair.substring(3) : pair.substring(0, 3);
+            var norm  = pair.replace("/", "");
+            var ccy   = isBuy ? norm.substring(3) : norm.substring(0, 3);
             var price = snapshots.stream()
-                .filter(p -> exchange.name().equals(p.exchange()) && pair.equals(p.pair()))
+                .filter(p -> exchange.name().equals(p.exchange()) && norm.equalsIgnoreCase(p.pair().replace("/", "")))
                 .findFirst()
                 .map(snap -> isBuy ? snap.ask() : snap.bid())
                 .orElse(0.0);
@@ -290,8 +291,8 @@ public class AutoTrader {
     public double computePnlFromLegs(List<OrderLeg> legs, double initialAmount) {
         var net = new HashMap<String, Double>();
         for (var leg : legs) {
-            var base  = leg.pair().substring(0, 3);
-            var quote = leg.pair().substring(3);
+            var base  = leg.pair().replace("/", "").substring(0, 3);
+            var quote = leg.pair().replace("/", "").substring(3);
             if (BUY.equals(leg.direction())) {
                 net.merge(base,   leg.quantity(),               Double::sum);
                 net.merge(quote, -leg.quantity() * leg.price(), Double::sum);
@@ -301,7 +302,7 @@ public class AutoTrader {
             }
         }
         return net.entrySet().stream()
-            .mapToDouble(e -> e.getValue() * currencyRateFeed.getRate(e.getKey()))
+            .mapToDouble(e -> e.getValue() * resolveUsdRate(e.getKey()))
             .sum();
     }
 
@@ -385,7 +386,17 @@ public class AutoTrader {
             ? 100_000 // default; overridden by ExchangeConfig via RiskService gate
             : 100_000;
     }
-    private double baseRate(String pair)  { return currencyRateFeed.getRate(pair.substring(0, 3)); }
-    private double quoteRate(String pair) { return currencyRateFeed.getRate(pair.substring(3)); }
+    private double baseRate(String pair)  { return resolveUsdRate(pair.replace("/", "").substring(0, 3)); }
+    private double quoteRate(String pair) { return resolveUsdRate(pair.replace("/", "").substring(3)); }
     private double min3(double a, double b, double c) { return DoubleStream.of(a, b, c).min().orElse(0); }
+
+    private double resolveUsdRate(String currency) {
+        var rate = currencyRateFeed.getRate(currency);
+        if (rate > 0) return rate;
+        return arbitrageEngine.currentSnapshots().stream()
+            .filter(s -> s.pair().replace("/", "").equalsIgnoreCase(currency + "USDT"))
+            .findFirst()
+            .map(s -> (s.bid() + s.ask()) / 2.0)
+            .orElse(0.0);
+    }
 }

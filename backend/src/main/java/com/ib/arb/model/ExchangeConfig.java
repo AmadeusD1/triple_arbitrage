@@ -37,12 +37,16 @@ public class ExchangeConfig {
     @Column(name = "max_daily_loss_usd")
     private double maxDailyLossUsd = -1_000;
 
+    @Column(name = "simulation")
+    private boolean simulation = true;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     public Long getId()                    { return id; }
     public String getExchange()            { return exchange; }
     public boolean isEnabled()             { return enabled; }
+    public boolean isSimulation()          { return simulation; }
     public String getApiKey()              { return apiKey; }
     public String getApiSecret()           { return apiSecret; }
     public String getApiPassphrase()       { return apiPassphrase; }
@@ -54,6 +58,7 @@ public class ExchangeConfig {
 
     public ExchangeConfig setExchange(String exchange)              { this.exchange = exchange;           return this; }
     public ExchangeConfig setEnabled(boolean enabled)               { this.enabled = enabled;             return this; }
+    public ExchangeConfig setSimulation(boolean simulation)         { this.simulation = simulation;       return this; }
     public ExchangeConfig setApiKey(String apiKey)                  { this.apiKey = apiKey;               return this; }
     public ExchangeConfig setApiSecret(String apiSecret)            { this.apiSecret = apiSecret;         return this; }
     public ExchangeConfig setApiPassphrase(String apiPassphrase)    { this.apiPassphrase = apiPassphrase; return this; }

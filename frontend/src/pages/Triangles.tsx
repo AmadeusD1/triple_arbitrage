@@ -22,7 +22,7 @@ interface Props { prices: PriceSnapshot[]; exchangeRunning: Record<string, boole
 type TrianglePayload = Omit<TriangleConfig, 'id' | 'hits' | 'totalProfitUsd'>;
 type ExchangePayload = Omit<ExchangeConfig, 'id' | 'createdAt'>;
 
-const KNOWN_EXCHANGES = ['KRAKEN', 'BINANCE', 'BITSTAMP', 'COINBASE', 'BITFINEX', 'HTX', 'KUCOIN'];
+const KNOWN_EXCHANGES = ['KRAKEN', 'BINANCE', 'BITSTAMP', 'COINBASE', 'BITFINEX', 'HTX', 'KUCOIN', 'BYBIT'];
 
 const EMPTY_TRI: TrianglePayload = {
   exchange: 'KRAKEN', pair1: '', pair2: '', pair3: '',
@@ -30,7 +30,7 @@ const EMPTY_TRI: TrianglePayload = {
 };
 
 const EMPTY_EX: ExchangePayload = {
-  exchange: 'BINANCE', enabled: false,
+  exchange: 'BINANCE', enabled: false, simulation: true,
   apiKey: null, apiSecret: null, apiPassphrase: null, wsUrl: null,
   orderSizeUsd: 100000, positionLimitUsd: 10000, maxDailyLossUsd: -1000,
 };
@@ -95,7 +95,8 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
   const openCreateEx = () => { setEditingExId(null); setExForm(EMPTY_EX); setExDialogOpen(true); };
   const openEditEx   = (c: ExchangeConfig) => {
     setEditingExId(c.id);
-    setExForm({ exchange: c.exchange, enabled: c.enabled, apiKey: c.apiKey, apiSecret: c.apiSecret,
+    setExForm({ exchange: c.exchange, enabled: c.enabled, simulation: c.simulation,
+                apiKey: c.apiKey, apiSecret: c.apiSecret,
                 apiPassphrase: c.apiPassphrase, wsUrl: c.wsUrl, orderSizeUsd: c.orderSizeUsd,
                 positionLimitUsd: c.positionLimitUsd, maxDailyLossUsd: c.maxDailyLossUsd });
     setExDialogOpen(true);
@@ -113,6 +114,10 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
   const handleDeleteEx    = async (id: number) => { await deleteExchangeConfig(id); void loadExchanges(); };
   const handleToggleEx    = async (c: ExchangeConfig) => {
     await updateExchangeConfig(c.id, { ...c, enabled: !c.enabled });
+    void loadExchanges();
+  };
+  const handleToggleModOp = async (c: ExchangeConfig) => {
+    await updateExchangeConfig(c.id, { ...c, simulation: !c.simulation });
     void loadExchanges();
   };
   const handleStartEx     = async (name: string) => { await startExchange(name); setSnack({ open: true, message: `${name} scan started`, severity: 'success' }); };
@@ -188,6 +193,7 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
                 <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>Pos. Limit</TableCell>
                 <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>Max Daily Loss</TableCell>
                 <TableCell align="center">Enabled</TableCell>
+                <TableCell align="center">ModOp</TableCell>
                 <TableCell align="center">Scan</TableCell>
                 <TableCell align="center">Actions</TableCell>
               </TableRow>
@@ -217,6 +223,18 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
                       <Switch size="small" checked={c.enabled} onChange={() => void handleToggleEx(c)} />
                     </TableCell>
                     <TableCell align="center">
+                      <Tooltip title={c.simulation ? 'Switch to Real Trade' : 'Switch to Simulation'}>
+                        <Chip
+                          label={c.simulation ? 'SIM' : 'REAL'}
+                          size="small"
+                          color={c.simulation ? 'default' : 'warning'}
+                          variant={c.simulation ? 'outlined' : 'filled'}
+                          onClick={() => void handleToggleModOp(c)}
+                          sx={{ cursor: 'pointer', fontWeight: 600, minWidth: 52 }}
+                        />
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell align="center">
                       {running
                         ? <Tooltip title="Stop scan"><IconButton size="small" color="error" onClick={() => void handleStopEx(c.exchange)}><StopIcon fontSize="small" /></IconButton></Tooltip>
                         : <Tooltip title="Start scan"><IconButton size="small" color="success" disabled={!c.enabled} onClick={() => void handleStartEx(c.exchange)}><PlayArrowIcon fontSize="small" /></IconButton></Tooltip>
@@ -234,7 +252,7 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
               })}
               {exchanges.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 3, color: 'text.secondary' }}>
                     No exchanges configured
                   </TableCell>
                 </TableRow>

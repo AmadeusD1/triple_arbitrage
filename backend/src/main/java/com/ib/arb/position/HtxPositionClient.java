@@ -64,7 +64,7 @@ public class HtxPositionClient implements PositionClient {
             root.path("data").path("list").forEach(b -> {
                 if ("trade".equals(b.path("type").asText())) {
                     var bal = b.path("balance").asDouble();
-                    if (bal > 0) balances.put(b.path("currency").asText().toUpperCase(), bal);
+                    if (bal > 0) balances.put(b.path("currency").asText(), bal);
                 }
             });
             return balances;

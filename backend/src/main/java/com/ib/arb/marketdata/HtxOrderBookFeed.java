@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -39,21 +40,36 @@ public class HtxOrderBookFeed implements OrderBookFeed {
     private final Map<String, OrderBook> snapshots = new ConcurrentHashMap<>();
 
     private volatile boolean connected = false;
+    private volatile boolean stopped = false;
     private volatile List<String> subscribedPairs = List.of();
     private volatile WebSocket activeWs = null;
+    private final AtomicBoolean connecting = new AtomicBoolean(false);
 
     public HtxOrderBookFeed(ExchangeConfigRepository configRepo) {
         this.configRepo = configRepo;
     }
 
     @Override public Exchange getExchange() { return Exchange.HTX; }
-    @Override public OrderBook getSnapshot(String pair) { return snapshots.get(pair.toUpperCase()); }
+    @Override public OrderBook getSnapshot(String pair) { return snapshots.get(pair.replace("/", "").toUpperCase()); }
     @Override public boolean isConnected() { return connected; }
 
     @Override
     public void subscribe(List<String> pairs) {
+        stopped = false;
         this.subscribedPairs = pairs;
         connect();
+    }
+
+    @Override
+    public void disconnect() {
+        stopped = true;
+        connected = false;
+        connecting.set(false);
+        var ws = activeWs;
+        activeWs = null;
+        if (ws != null) try { ws.abort(); } catch (Exception ignored) {}
+        snapshots.clear();
+        log.info("[HTX] Feed disconnected");
     }
 
     private String wsUrl() {
@@ -63,18 +79,23 @@ public class HtxOrderBookFeed implements OrderBookFeed {
     }
 
     private void connect() {
+        if (!connecting.compareAndSet(false, true)) return;
         try {
             httpClient.newWebSocketBuilder()
                 .buildAsync(URI.create(wsUrl()), new Listener())
-                .whenComplete((ws, ex) -> { if (ex != null) scheduleReconnect(); });
+                .whenComplete((ws, ex) -> {
+                    connecting.set(false);
+                    if (ex != null) scheduleReconnect();
+                });
         } catch (Exception e) {
+            connecting.set(false);
             scheduleReconnect();
         }
     }
 
     private void scheduleReconnect() {
         connected = false;
-        reconnectScheduler.schedule(this::connect, 3, TimeUnit.SECONDS);
+        if (!stopped) reconnectScheduler.schedule(this::connect, 3, TimeUnit.SECONDS);
     }
 
     private String decompress(ByteBuffer buffer) throws Exception {
@@ -122,9 +143,10 @@ public class HtxOrderBookFeed implements OrderBookFeed {
 
     private String buildSubscribe(String pair) {
         try {
+            var symbol = pair.replace("/", "").toLowerCase();
             return mapper.writeValueAsString(Map.of(
-                "sub", "market." + pair.toLowerCase() + ".bbo",
-                "id",  "bbo_" + pair.toLowerCase()
+                "sub", "market." + symbol + ".bbo",
+                "id",  "bbo_" + symbol
             ));
         } catch (Exception e) { return "{}"; }
     }

@@ -17,6 +17,7 @@ export interface TradeLeg {
 export interface Trade {
   id: number;
   time: string;
+  exchange: string;
   direction: CycleDirection;
   spread: number;
   pnl: number;
@@ -98,7 +99,7 @@ export interface ExecutionStats {
 
 export interface AnalyticsData {
   drawdown: number;
-  sharpe: number;
+  monthlyPnl: number;
   winRate: number;
 }
 
@@ -132,6 +133,7 @@ export interface ExchangeConfig {
   id: number;
   exchange: string;
   enabled: boolean;
+  simulation: boolean;
   apiKey: string | null;
   apiSecret: string | null;
   apiPassphrase: string | null;

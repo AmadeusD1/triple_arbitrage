@@ -24,8 +24,8 @@ public abstract class AbstractOrderClient implements OrderClient {
 
     @Override
     public boolean isSimulation() {
-        return settings.findById(SIMULATION_MODE_KEY)
-            .map(s -> s.getValue() == 1.0)
+        return configRepo.findByExchange(getExchange().name())
+            .map(c -> c.isSimulation())
             .orElse(true);
     }
 

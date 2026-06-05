@@ -50,6 +50,10 @@ public class CurrencyRateFeed {
 
     @PostConstruct
     public void start() {
+        if (feedUrl == null || feedUrl.isBlank()) {
+            log.info("[FX] No feed URL configured — using fallback rates only");
+            return;
+        }
         connect();
     }
 
@@ -64,6 +68,8 @@ public class CurrencyRateFeed {
         if (direct != null) return direct;
         var inverse = rates.get("USD/" + isoCurrency);
         if (inverse != null && inverse != 0.0) return 1.0 / inverse;
+        // USD-pegged stablecoins: use 1.0 only as last resort if no market rate available
+        if ("USDT".equals(isoCurrency) || "USDC".equals(isoCurrency) || "BUSD".equals(isoCurrency)) return 1.0;
         return 0.0;
     }
 
