@@ -4,6 +4,8 @@ import com.ib.arb.repository.TradeRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 
 /**
@@ -14,6 +16,8 @@ import java.util.List;
  */
 @Service
 public class AnalyticsService {
+
+    private static final ZoneId CHICAGO = ZoneId.of("America/Chicago");
 
     private final TradeRepository trades;
 
@@ -27,7 +31,9 @@ public class AnalyticsService {
      * @return total profit/loss in USD for the current day; {@code 0.0} if no trades exist
      */
     public double dailyProfitAndLoss() {
-        var startOfDay = LocalDateTime.now().toLocalDate().atStartOfDay();
+        var startOfDay = ZonedDateTime.now(CHICAGO)
+            .toLocalDate().atStartOfDay(CHICAGO)
+            .withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
         var sum = trades.sumPnlSince(startOfDay);
         return sum != null ? sum : 0.0;
     }
@@ -75,7 +81,9 @@ public class AnalyticsService {
      * @return total profit/loss in USD for the current month; {@code 0.0} if no trades exist
      */
     public double monthlyPnl() {
-        var startOfMonth = LocalDateTime.now().toLocalDate().withDayOfMonth(1).atStartOfDay();
+        var startOfMonth = ZonedDateTime.now(CHICAGO)
+            .toLocalDate().withDayOfMonth(1).atStartOfDay(CHICAGO)
+            .withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
         var sum = trades.sumPnlSince(startOfMonth);
         return sum != null ? sum : 0.0;
     }

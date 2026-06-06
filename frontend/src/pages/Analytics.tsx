@@ -18,8 +18,24 @@ const CLOCK_EMOJIS = Array.from({ length: 24 }, (_, h) => {
   return h12 === 0 ? '\u{1F55B}' : String.fromCodePoint(0x1F54F + h12);
 });
 
-function dayIndex(d: Date): number {
-  return (d.getDay() + 6) % 7; // 0=Mon … 6=Sun
+const TZ = 'America/Chicago';
+const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+/** Java LocalDateTime has no 'Z' — append it so JS treats the value as UTC. */
+function parseUTC(ts: string): Date {
+  return new Date(ts.endsWith('Z') ? ts : ts + 'Z');
+}
+
+function chicagoHour(d: Date): number {
+  const h = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, hour: 'numeric', hour12: false,
+  }).format(d));
+  return h % 24; // midnight returns 24 in some engines
+}
+
+function chicagoDayIndex(d: Date): number {
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' }).format(d);
+  return WEEKDAYS.indexOf(wd); // 0=Mon … 6=Sun
 }
 
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
@@ -41,8 +57,8 @@ export default function Analytics() {
     return () => clearInterval(t);
   }, []);
 
-  const currentDay  = dayIndex(now);
-  const currentHour = now.getHours();
+  const currentDay  = chicagoDayIndex(now);
+  const currentHour = chicagoHour(now);
 
   const exchanges = useMemo(() => {
     const s = new Set(trades.map((t) => t.exchange));
@@ -59,8 +75,8 @@ export default function Analytics() {
   const matrix = useMemo(() => {
     const m: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
     for (const t of filtered) {
-      const d = new Date(t.time);
-      m[dayIndex(d)][d.getHours()]++;
+      const d = parseUTC(t.time);
+      m[chicagoDayIndex(d)][chicagoHour(d)]++;
     }
     return m;
   }, [filtered]);
@@ -68,8 +84,8 @@ export default function Analytics() {
   const pnlMatrix = useMemo(() => {
     const m: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
     for (const t of filtered) {
-      const d = new Date(t.time);
-      m[dayIndex(d)][d.getHours()] += t.pnl;
+      const d = parseUTC(t.time);
+      m[chicagoDayIndex(d)][chicagoHour(d)] += t.pnl;
     }
     return m;
   }, [filtered]);
@@ -103,7 +119,7 @@ export default function Analytics() {
     <Container maxWidth="xl" sx={{ py: 3 }}>
       <Typography variant="h5" sx={{ mb: 0.5 }}>Analytics</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Heatmaps by day of week and hour — opportunity frequency and cumulative profit.
+        Heatmaps by day of week and hour — opportunity frequency and cumulative profit. Times in US Central.
       </Typography>
 
       <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
