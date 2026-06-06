@@ -125,11 +125,23 @@ public class AutoTrader {
         var legs = computeLegs(s, maxVolume);
         var expectedPnl = computePnlFromLegs(legs, maxVolume);
 
+        // Phase 1: validate from cache — avoid API calls for rejected opportunities
         var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), maxVolume, s.profit(), expectedPnl);
         if (!v.allowed()) {
             recordMissed(s, legs, maxVolume, expectedPnl, v);
             counter(missedMap, s.exchange()).incrementAndGet();
             return;
+        }
+
+        // Phase 2: real trades only — refresh then re-check balance with fresh data
+        if (!broker.isSimulation()) {
+            positions.refreshBalances(s.exchange());
+            if (!hasBalanceForAllLegs(s.exchange(), s.config(), s.cycle().name(), maxVolume)) {
+                var balReject = ValidationResult.reject(REJECTED_BALANCE, "Insufficient balance after pre-trade refresh");
+                recordMissed(s, legs, maxVolume, expectedPnl, balReject);
+                counter(missedMap, s.exchange()).incrementAndGet();
+                return;
+            }
         }
 
         var start = System.currentTimeMillis();
@@ -219,7 +231,8 @@ public class AutoTrader {
 
         var trade = buildTrade(signal, broker, legResults, latencyMs, estimatedPnl, filled, orderSize, expectedPnl);
         tradeRepo.save(trade);
-        positions.refreshBalances(signal.exchange());
+        // Simulation trades need no position refresh; real trades wait 2s for order settlement
+        if (!broker.isSimulation()) positions.refreshBalancesDelayed(signal.exchange(), 2000);
 
         if (filled) {
             counter(executedMap, signal.exchange()).incrementAndGet();

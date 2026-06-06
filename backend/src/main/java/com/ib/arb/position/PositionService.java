@@ -6,14 +6,15 @@ import com.ib.arb.repository.ExchangeConfigRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -21,14 +22,16 @@ public class PositionService {
 
     private static final Logger log = LoggerFactory.getLogger(PositionService.class);
 
-    @Value("${kraken.position-cache-ttl-ms:2000}")
-    private long cacheTtlMs;
-
     private final List<PositionClient> clients;
     private final TriangleConfigRepository triangleRepo;
     private final ExchangeConfigRepository exchangeConfigRepo;
-    private final Map<Exchange, Map<String, Double>> balanceCache  = new ConcurrentHashMap<>();
-    private final Map<Exchange, Long>                lastRefreshed = new ConcurrentHashMap<>();
+    private final Map<Exchange, Map<String, Double>> balanceCache = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService refreshScheduler =
+        Executors.newSingleThreadScheduledExecutor(r -> {
+            var t = new Thread(r, "position-refresh");
+            t.setDaemon(true);
+            return t;
+        });
 
     public PositionService(List<PositionClient> clients, TriangleConfigRepository triangleRepo,
                            ExchangeConfigRepository exchangeConfigRepo) {
@@ -37,9 +40,19 @@ public class PositionService {
         this.exchangeConfigRepo = exchangeConfigRepo;
     }
 
+    /** Called once at startup to warm the balance cache for all enabled exchanges. */
+    public void startupRefresh() {
+        clients.stream()
+            .filter(c -> {
+                var cfg = exchangeConfigRepo.findByExchange(c.getExchange().name()).orElse(null);
+                return cfg != null && cfg.isEnabled();
+            })
+            .forEach(c -> refreshBalances(c.getExchange()));
+    }
+
+    /** Reads from cache. Cache is populated by startupRefresh, pre-trade, and post-trade refreshes. */
     public boolean hasAvailableBalance(Exchange exchange, String isoCurrency, double requiredAmount) {
         if (isSimulation(exchange)) return true;
-        if (isStale(exchange)) refreshBalances(exchange);
         var balances  = balanceCache.getOrDefault(exchange, Map.of());
         var available = balances.getOrDefault(toAssetKey(exchange, isoCurrency), 0.0);
         return available >= requiredAmount;
@@ -47,19 +60,8 @@ public class PositionService {
 
     public double getAvailableAmount(Exchange exchange, String isoCurrency) {
         if (isSimulation(exchange)) return SIMULATION_BALANCE;
-        if (isStale(exchange)) refreshBalances(exchange);
         var key = toAssetKey(exchange, isoCurrency);
         return balanceCache.getOrDefault(exchange, Map.of()).getOrDefault(key, 0.0);
-    }
-
-    @Scheduled(fixedDelayString = "${kraken.position-cache-ttl-ms:2000}")
-    public void scheduledRefresh() {
-        clients.stream()
-            .filter(c -> {
-                var cfg = exchangeConfigRepo.findByExchange(c.getExchange().name()).orElse(null);
-                return cfg != null && cfg.isEnabled() && !cfg.isSimulation();
-            })
-            .forEach(c -> refreshBalances(c.getExchange()));
     }
 
     public void refreshBalances(Exchange exchange) {
@@ -70,14 +72,17 @@ public class PositionService {
                 var fetched = c.fetchBalances();
                 if (!fetched.isEmpty()) {
                     balanceCache.put(exchange, fetched);
-                    lastRefreshed.put(exchange, System.currentTimeMillis());
                     log.info("[Position] Refreshed {} ({} entries)", exchange, fetched.size());
                 }
             });
     }
 
+    /** Schedules a balance refresh after {@code delayMs} ms — used post-trade for settlement. */
+    public void refreshBalancesDelayed(Exchange exchange, long delayMs) {
+        refreshScheduler.schedule(() -> refreshBalances(exchange), delayMs, TimeUnit.MILLISECONDS);
+    }
+
     public List<BalanceEntry> getBalances(Exchange exchange) {
-        if (isStale(exchange)) refreshBalances(exchange);
         var relevantKeys = triangleRepo.findAll().stream()
             .flatMap(t -> List.of(t.getPair1(), t.getPair2(), t.getPair3()).stream())
             .flatMap(pair -> List.of(pair.substring(0, 3), pair.substring(3)).stream())
@@ -95,7 +100,7 @@ public class PositionService {
         return clients.stream()
             .filter(c -> {
                 var cfg = exchangeConfigRepo.findByExchange(c.getExchange().name()).orElse(null);
-                return cfg != null && cfg.isEnabled() && !cfg.isSimulation();
+                return cfg != null && cfg.isEnabled();
             })
             .flatMap(c -> c.fetchOpenOrders().stream())
             .toList();
@@ -107,11 +112,6 @@ public class PositionService {
         return exchangeConfigRepo.findByExchange(exchange.name())
             .map(c -> c.isSimulation())
             .orElse(true);
-    }
-
-    private boolean isStale(Exchange exchange) {
-        var last = lastRefreshed.get(exchange);
-        return last == null || System.currentTimeMillis() - last > cacheTtlMs;
     }
 
     private String toAssetKey(Exchange exchange, String iso) {
