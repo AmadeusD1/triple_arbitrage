@@ -5,6 +5,7 @@ import {
 } from '@mui/material';
 import { getTrades } from '../api/rest';
 import type { Trade, TradeStatus } from '../types';
+import Histograms from './Histograms';
 
 type DirectionFilter = Trade['direction'] | 'ALL';
 type StatusFilter = TradeStatus | 'ALL';
@@ -353,12 +354,7 @@ export default function Analytics() {
       </>)}
 
       {tabIndex === 1 && (
-        <Box sx={{ py: 4 }}>
-          <Typography variant="h5" sx={{ mb: 0.5 }}>Histograms</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Coming soon.
-          </Typography>
-        </Box>
+        <Histograms trades={trades} exchanges={exchanges} />
       )}
     </Container>
   );
