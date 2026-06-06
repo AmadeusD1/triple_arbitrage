@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Box, Container, FormControl, InputLabel, MenuItem, Paper,
-  Select, Tooltip, Typography,
+  Select, Tab, Tabs, Tooltip, Typography,
 } from '@mui/material';
 import { getTrades } from '../api/rest';
 import type { Trade, TradeStatus } from '../types';
@@ -46,6 +46,7 @@ export default function Analytics() {
   const [direction, setDirection] = useState<DirectionFilter>('ALL');
   const [exchange, setExchange] = useState<ExchangeFilter>('ALL');
 
+  const [tabIndex, setTabIndex] = useState(0);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -117,7 +118,13 @@ export default function Analytics() {
 
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
-      <Typography variant="h5" sx={{ mb: 0.5 }}>Analytics</Typography>
+      <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+        <Tab label="Heatmaps" />
+        <Tab label="Histograms" />
+      </Tabs>
+
+      {tabIndex === 0 && (<>
+      <Typography variant="h5" sx={{ mb: 0.5 }}>Heatmaps</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Heatmaps by day of week and hour — opportunity frequency and cumulative profit. Times in US Central.
       </Typography>
@@ -343,6 +350,16 @@ export default function Analytics() {
         </Paper>
 
       </Box>
+      </>)}
+
+      {tabIndex === 1 && (
+        <Box sx={{ py: 4 }}>
+          <Typography variant="h5" sx={{ mb: 0.5 }}>Histograms</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Coming soon.
+          </Typography>
+        </Box>
+      )}
     </Container>
   );
 }
