@@ -19,17 +19,20 @@ type GroupBy   = 'YEARS' | 'MONTHS' | 'DAYS';
 
 interface Datum { label: string; pnl: number; }
 
+// Module-level formatters — created once, not on every trade iteration
+const _yearFmt  = new Intl.DateTimeFormat('en-US', { timeZone: TZ, year: 'numeric' });
+const _monthFmt = new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'numeric' });
+const _dayFmt   = new Intl.DateTimeFormat('en-US', { timeZone: TZ, day: 'numeric' });
+
 function parseUTC(ts: string): Date {
   return new Date(ts.endsWith('Z') ? ts : ts + 'Z');
 }
 
 function dateParts(d: Date) {
-  const fmt = (opts: Intl.DateTimeFormatOptions) =>
-    Number(new Intl.DateTimeFormat('en-US', { timeZone: TZ, ...opts }).format(d));
   return {
-    year:  fmt({ year: 'numeric' }),
-    month: fmt({ month: 'numeric' }) - 1, // 0-indexed
-    day:   fmt({ day: 'numeric' }),
+    year:  Number(_yearFmt.format(d)),
+    month: Number(_monthFmt.format(d)) - 1, // 0-indexed
+    day:   Number(_dayFmt.format(d)),
   };
 }
 

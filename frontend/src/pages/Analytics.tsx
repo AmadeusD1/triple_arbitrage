@@ -23,21 +23,21 @@ const CLOCK_EMOJIS = Array.from({ length: 24 }, (_, h) => {
 const TZ = 'America/Chicago';
 const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
+// Module-level formatters — created once, not on every trade iteration
+const _hourFmt    = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', hour12: false });
+const _weekdayFmt = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' });
+
 /** Java LocalDateTime has no 'Z' — append it so JS treats the value as UTC. */
 function parseUTC(ts: string): Date {
   return new Date(ts.endsWith('Z') ? ts : ts + 'Z');
 }
 
 function chicagoHour(d: Date): number {
-  const h = Number(new Intl.DateTimeFormat('en-US', {
-    timeZone: TZ, hour: 'numeric', hour12: false,
-  }).format(d));
-  return h % 24; // midnight returns 24 in some engines
+  return Number(_hourFmt.format(d)) % 24; // midnight returns 24 in some engines
 }
 
 function chicagoDayIndex(d: Date): number {
-  const wd = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' }).format(d);
-  return WEEKDAYS.indexOf(wd); // 0=Mon … 6=Sun
+  return WEEKDAYS.indexOf(_weekdayFmt.format(d)); // 0=Mon … 6=Sun
 }
 
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
