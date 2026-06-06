@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSessionState } from '../hooks/useSessionState';
 import {
   Box, Container, FormControl, InputLabel, MenuItem, Paper,
   Select, Tab, Tabs, Tooltip, Typography,
@@ -43,11 +44,11 @@ function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 
 export default function Analytics() {
   const [trades, setTrades] = useState<Trade[]>([]);
-  const [status, setStatus] = useState<StatusFilter>('ALL');
-  const [direction, setDirection] = useState<DirectionFilter>('ALL');
-  const [exchange, setExchange] = useState<ExchangeFilter>('ALL');
+  const [status, setStatus] = useSessionState<StatusFilter>('analytics:status', 'ALL');
+  const [direction, setDirection] = useSessionState<DirectionFilter>('analytics:direction', 'ALL');
+  const [exchange, setExchange] = useSessionState<ExchangeFilter>('analytics:exchange', 'ALL');
 
-  const [tabIndex, setTabIndex] = useState(0);
+  const [tabIndex, setTabIndex] = useSessionState('analytics:tabIndex', 0);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {

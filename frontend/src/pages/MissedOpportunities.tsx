@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSessionState } from '../hooks/useSessionState';
 import {
   Box, Button, Chip, Container, Dialog, DialogContent, DialogTitle,
   IconButton, Paper, Table, TableBody, TableCell,
@@ -69,7 +70,7 @@ function LegDetailDialog({ row, onClose }: { row: MissedOpportunity | null; onCl
 }
 
 export default function MissedOpportunities({ rows }: Props) {
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useSessionState('missed:page', 0);
   const [selected, setSelected] = useState<MissedOpportunity | null>(null);
 
   const slice = rows.slice(page * ROWS_PER_PAGE, (page + 1) * ROWS_PER_PAGE);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSessionState } from '../hooks/useSessionState';
 import type { ReactNode } from 'react';
 import {
   Alert, Box, Button, Chip, Container, FormControl, Grid, MenuItem,
@@ -56,7 +57,7 @@ export default function Dashboard() {
   const [analytics, setAnalytics] = useState<AnalyticsData>({ drawdown: 0, monthlyPnl: 0, winRate: 0 });
   const [execution, setExecution] = useState<ExecutionStats>({ avgLatency: 0, maxLatency: 0, fillRate: 0 });
   const [equity, setEquity] = useState<EquityPoint[]>([]);
-  const [equityStatus, setEquityStatus] = useState<EquityStatusFilter>('ALL');
+  const [equityStatus, setEquityStatus] = useSessionState<EquityStatusFilter>('dashboard:equityStatus', 'ALL');
   const [running, setRunning] = useState(false);
 
   useEffect(() => {

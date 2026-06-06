@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSessionState } from '../hooks/useSessionState';
 import {
   Box, Button, FormControl, InputLabel, MenuItem, Paper, Select, Typography,
 } from '@mui/material';
@@ -88,11 +89,11 @@ interface Props {
 }
 
 export default function Histograms({ trades, exchanges }: Props) {
-  const [tradeType, setTradeType]         = useState<TradeType>('ALL');
-  const [exchange, setExchange]           = useState('ALL');
-  const [groupBy, setGroupBy]             = useState<GroupBy>('YEARS');
-  const [selectedYear, setSelectedYear]   = useState<number | ''>('');
-  const [selectedMonth, setSelectedMonth] = useState<number | ''>('');
+  const [tradeType, setTradeType]         = useSessionState<TradeType>('histograms:tradeType', 'ALL');
+  const [exchange, setExchange]           = useSessionState('histograms:exchange', 'ALL');
+  const [groupBy, setGroupBy]             = useSessionState<GroupBy>('histograms:groupBy', 'YEARS');
+  const [selectedYear, setSelectedYear]   = useSessionState<number | ''>('histograms:selectedYear', '');
+  const [selectedMonth, setSelectedMonth] = useSessionState<number | ''>('histograms:selectedMonth', '');
   const [chartData, setChartData]         = useState<Datum[] | null>(null);
 
   // Only years that actually have trade data

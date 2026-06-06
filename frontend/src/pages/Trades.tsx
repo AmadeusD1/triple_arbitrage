@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSessionState } from '../hooks/useSessionState';
 import {
   Box, Button, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
   IconButton, Paper, Table, TableBody, TableCell, TableContainer, TableHead,
@@ -96,8 +97,8 @@ export default function Trades() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [page, setPage] = useSessionState('trades:page', 0);
+  const [rowsPerPage, setRowsPerPage] = useSessionState('trades:rowsPerPage', 25);
 
   const loadTrades = () => getTrades().then((res) => setTrades(res.data));
 
