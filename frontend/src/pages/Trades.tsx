@@ -178,6 +178,8 @@ export default function Trades() {
           rowsPerPageOptions={[10, 25, 50, 100]}
           onPageChange={(_, p) => setPage(p)}
           onRowsPerPageChange={(e) => { setRowsPerPage(+e.target.value); setPage(0); }}
+          showFirstButton
+          showLastButton
         />
       </Paper>
 
