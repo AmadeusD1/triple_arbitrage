@@ -245,12 +245,13 @@ export default function Histograms({ trades, exchanges }: Props) {
             {hasData && (
               <>
                 <RechartsTooltip
+                  cursor={false}
                   formatter={(v: unknown) => [`$${(v as number).toFixed(4)}`, 'Profit']}
                   contentStyle={{ background: '#1e1e2e', border: '1px solid #333', borderRadius: 6 }}
                   labelStyle={{ color: '#ccc' }}
                   itemStyle={{ color: '#fff' }}
                 />
-                <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
+                <Bar dataKey="pnl" radius={[3, 3, 0, 0]} activeBar={false}>
                   {chartData!.map((d, i) => (
                     <Cell
                       key={i}
