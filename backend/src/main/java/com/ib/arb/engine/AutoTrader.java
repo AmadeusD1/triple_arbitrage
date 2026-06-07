@@ -33,6 +33,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -323,7 +324,7 @@ public class AutoTrader {
             long latencyMs, double estimatedPnl, boolean filled,
             double orderSize, double expectedPnl) {
         var trade = new Trade()
-            .setTime(LocalDateTime.now())
+            .setTime(LocalDateTime.now(ZoneOffset.UTC))
             .setDirection(signal.cycle().name())
             .setSpread(signal.profit())
             .setPnl(estimatedPnl)
@@ -352,7 +353,7 @@ public class AutoTrader {
             case REJECTED_PROFIT  -> log.warn("[ARB] {} Missed — profit threshold not met: {}", s.exchange(), v.reason());
         }
         missedOpportunityRepo.save(new MissedOpportunity()
-            .setTime(LocalDateTime.now())
+            .setTime(LocalDateTime.now(ZoneOffset.UTC))
             .setTriangleId(s.config().getId())
             .setExchange(s.exchange().name())
             .setPair1(s.config().getPair1()).setPair2(s.config().getPair2()).setPair3(s.config().getPair3())

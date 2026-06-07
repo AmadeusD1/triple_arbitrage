@@ -6,6 +6,8 @@ import com.ib.arb.repository.TradeRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 
 /**
  * Enforces pre-order risk controls.
@@ -38,7 +40,9 @@ public class RiskService {
         if (orderSize > posLimit)
             return RiskResult.block("Position limit exceeded");
 
-        var startOfDay = LocalDateTime.now().toLocalDate().atStartOfDay();
+        var startOfDay = ZonedDateTime.now(ZoneId.of("America/Chicago"))
+            .toLocalDate().atStartOfDay(ZoneId.of("America/Chicago"))
+            .withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
         var dailyPnl   = trades.sumPnlSinceForExchange(startOfDay, exchange.name());
         if (dailyPnl != null && dailyPnl <= maxDailyLoss)
             return RiskResult.block("Max daily loss reached");
