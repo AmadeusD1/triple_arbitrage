@@ -145,6 +145,8 @@ export default function MissedOpportunities({ rows }: Props) {
           rowsPerPage={ROWS_PER_PAGE}
           rowsPerPageOptions={[ROWS_PER_PAGE]}
           onPageChange={(_, p) => setPage(p)}
+          showFirstButton
+          showLastButton
         />
       </Paper>
       <LegDetailDialog row={selected} onClose={() => setSelected(null)} />
