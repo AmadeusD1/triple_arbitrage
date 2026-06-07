@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import { useSessionState } from '../hooks/useSessionState';
 import {
   Box, Button, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
-  IconButton, Paper, Table, TableBody, TableCell, TableContainer, TableHead,
-  TablePagination, TableRow, Typography, useTheme, useMediaQuery,
+  FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Table, TableBody,
+  TableCell, TableContainer, TableHead, TablePagination, TableRow, Typography,
+  useTheme, useMediaQuery,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { getTrade, getTrades, deleteSimulationTrades } from '../api/rest';
 import type { Trade, TradeDetail, LegStatus } from '../types';
+
+type TypeFilter = 'ALL' | 'REAL' | 'SIMULATION';
 
 const LEG_STATUS_COLOR: Record<LegStatus, 'success' | 'error' | 'default'> = {
   FILLED:    'success',
@@ -97,6 +100,7 @@ export default function Trades() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [typeFilter, setTypeFilter] = useSessionState<TypeFilter>('trades:typeFilter', 'ALL');
   const [page, setPage] = useSessionState('trades:page', 0);
   const [rowsPerPage, setRowsPerPage] = useSessionState('trades:rowsPerPage', 25);
 
@@ -110,16 +114,36 @@ export default function Trades() {
     finally { setDeleting(false); }
   };
 
-  const visibleTrades = trades.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const filteredTrades = trades.filter(t => {
+    if (typeFilter === 'SIMULATION') return t.status === 'SIMULATION';
+    if (typeFilter === 'REAL') return t.status !== 'SIMULATION';
+    return true;
+  });
+
+  const visibleTrades = filteredTrades.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
 
   return (
     <Container maxWidth="xl" sx={{ py: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h5">Trades</Typography>
-        <Button variant="outlined" color="error" size="small"
-          onClick={handleDeleteSimulations} disabled={deleting}>
-          {deleting ? 'Deleting…' : 'Delete Simulations'}
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Type</InputLabel>
+            <Select
+              label="Type"
+              value={typeFilter}
+              onChange={e => { setTypeFilter(e.target.value as TypeFilter); setPage(0); }}
+            >
+              <MenuItem value="ALL">All</MenuItem>
+              <MenuItem value="REAL">Real Trade</MenuItem>
+              <MenuItem value="SIMULATION">Simulation</MenuItem>
+            </Select>
+          </FormControl>
+          <Button variant="outlined" color="error" size="small"
+            onClick={handleDeleteSimulations} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete Simulations'}
+          </Button>
+        </Box>
       </Box>
       <Paper>
         <TableContainer>
@@ -172,7 +196,7 @@ export default function Trades() {
         </TableContainer>
         <TablePagination
           component="div"
-          count={trades.length}
+          count={filteredTrades.length}
           page={page}
           rowsPerPage={rowsPerPage}
           rowsPerPageOptions={[10, 25, 50, 100]}
