@@ -30,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await apiLogout();
+    sessionStorage.clear();
     setUser(null);
     window.location.href = '/login';
   };
