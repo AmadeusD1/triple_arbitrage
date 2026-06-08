@@ -28,6 +28,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("com.fasterxml.jackson.core:jackson-databind")
     implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
     runtimeOnly("org.postgresql:postgresql:42.7.6")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
