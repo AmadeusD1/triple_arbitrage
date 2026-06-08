@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSessionState } from '../hooks/useSessionState';
 import {
   Box, Button, Chip, CircularProgress, Container, Dialog, DialogContent, DialogTitle,
@@ -101,8 +101,13 @@ export default function Trades() {
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [typeFilter, setTypeFilter] = useSessionState<TypeFilter>('trades:typeFilter', 'ALL');
+  const [exchangeFilter, setExchangeFilter] = useSessionState('trades:exchangeFilter', 'ALL');
+  const [dirFilter, setDirFilter] = useSessionState('trades:dirFilter', 'ALL');
   const [page, setPage] = useSessionState('trades:page', 0);
   const [rowsPerPage, setRowsPerPage] = useSessionState('trades:rowsPerPage', 25);
+
+  const exchanges = useMemo(() => [...new Set(trades.map(t => t.exchange))].sort(), [trades]);
+  const directions = useMemo(() => [...new Set(trades.map(t => t.direction))].sort(), [trades]);
 
   const loadTrades = () => getTrades().then((res) => setTrades(res.data));
 
@@ -115,8 +120,10 @@ export default function Trades() {
   };
 
   const filteredTrades = trades.filter(t => {
-    if (typeFilter === 'SIMULATION') return t.status === 'SIMULATION';
-    if (typeFilter === 'REAL') return t.status !== 'SIMULATION';
+    if (typeFilter === 'SIMULATION' && t.status !== 'SIMULATION') return false;
+    if (typeFilter === 'REAL' && t.status === 'SIMULATION') return false;
+    if (exchangeFilter !== 'ALL' && t.exchange !== exchangeFilter) return false;
+    if (dirFilter !== 'ALL' && t.direction !== dirFilter) return false;
     return true;
   });
 
@@ -137,6 +144,28 @@ export default function Trades() {
               <MenuItem value="ALL">All</MenuItem>
               <MenuItem value="REAL">Real Trade</MenuItem>
               <MenuItem value="SIMULATION">Simulation</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 140 }}>
+            <InputLabel>Exchange</InputLabel>
+            <Select
+              label="Exchange"
+              value={exchangeFilter}
+              onChange={e => { setExchangeFilter(e.target.value); setPage(0); }}
+            >
+              <MenuItem value="ALL">All</MenuItem>
+              {exchanges.map(ex => <MenuItem key={ex} value={ex}>{ex}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>Dir</InputLabel>
+            <Select
+              label="Dir"
+              value={dirFilter}
+              onChange={e => { setDirFilter(e.target.value); setPage(0); }}
+            >
+              <MenuItem value="ALL">All</MenuItem>
+              {directions.map(d => <MenuItem key={d} value={d}>{d}</MenuItem>)}
             </Select>
           </FormControl>
           <Button variant="outlined" color="error" size="small"
