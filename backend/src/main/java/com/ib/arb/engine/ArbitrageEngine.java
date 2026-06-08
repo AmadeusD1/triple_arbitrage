@@ -14,9 +14,11 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Service
@@ -65,6 +67,12 @@ public class ArbitrageEngine {
                 .map(snap -> new PriceSnapshot(
                     feed.getExchange().name(), snap.pair(), snap.bid(), snap.ask())))
             .filter(Objects::nonNull)
+            .collect(Collectors.toMap(
+                ps -> ps.exchange() + ":" + ps.pair(),
+                ps -> ps,
+                (a, b) -> a,
+                LinkedHashMap::new))
+            .values().stream()
             .toList();
     }
 
