@@ -67,7 +67,7 @@ db/
 
 ansible/
   deploy.sh          # local: builds artifacts then runs playbook.yml
-  inventory.ini      # target host (137.220.36.152, user: arbitrage)
+  inventory.ini      # target host (139.180.214.92, user: arbitrage — singaporetrader, Vultr SGP)
   requirements.yml   # community.postgresql, community.general, ansible.posix
   group_vars/
     all.yml          # all deployment variables
