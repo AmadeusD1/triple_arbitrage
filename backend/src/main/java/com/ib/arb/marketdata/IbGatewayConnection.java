@@ -13,15 +13,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Manages a single persistent socket connection to IB Gateway / TWS.
- * Implements EWrapper so it receives all callbacks from the TWS API inline.
+ * Extends DefaultEWrapper (no-ops for all protobuf callbacks) and overrides
+ * only the callbacks relevant to market data, orders, and account summary.
  *
  * Host and port are read from exchange_configs.ws_url (e.g. "localhost:4001").
  * Client ID is read from exchange_configs.api_passphrase (defaults to 1).
  *
- * Place TwsApi.jar (downloaded from https://interactivebrokers.github.io) in backend/libs/.
+ * Requires TwsApi.jar (TWS API 10.45) in backend/libs/.
  */
 @Component
-public class IbGatewayConnection implements EWrapper {
+public class IbGatewayConnection extends DefaultEWrapper {
 
     private static final Logger log = LoggerFactory.getLogger(IbGatewayConnection.class);
     private static final String DEFAULT_HOST = "localhost";
@@ -38,17 +39,17 @@ public class IbGatewayConnection implements EWrapper {
     private final AtomicBoolean connecting = new AtomicBoolean(false);
 
     // market data: pair (EURUSD) -> [bid, bidQty, ask, askQty]
-    final Map<String, double[]> marketData = new ConcurrentHashMap<>();
+    public final Map<String, double[]> marketData = new ConcurrentHashMap<>();
     private final Map<Integer, String> tickerToPair = new ConcurrentHashMap<>();
     private final AtomicInteger tickerIdSeq = new AtomicInteger(1);
     private volatile List<String> subscribedPairs = List.of();
 
     // account: currency -> cash balance
-    final Map<String, Double> cashBalances = new ConcurrentHashMap<>();
-    volatile long lastBalanceTs = 0;
+    public final Map<String, Double> cashBalances = new ConcurrentHashMap<>();
+    public volatile long lastBalanceTs = 0;
 
     // open orders from IB callbacks
-    final Map<Integer, OpenOrderInfo> openOrderMap = new ConcurrentHashMap<>();
+    public final Map<Integer, OpenOrderInfo> openOrderMap = new ConcurrentHashMap<>();
 
     // pending live-order futures: ibOrderId -> CompletableFuture<ibOrderId string>
     final Map<Integer, CompletableFuture<String>> pendingOrders = new ConcurrentHashMap<>();
@@ -171,7 +172,7 @@ public class IbGatewayConnection implements EWrapper {
         order.orderId(orderId);
         order.action(direction.toUpperCase());
         order.orderType("LMT");
-        order.totalQuantity(Decimal.get128BitDecimalFromDouble(qty));
+        order.totalQuantity(Decimal.get(qty));
         order.lmtPrice(price);
         order.tif("DAY");
 
@@ -257,9 +258,9 @@ public class IbGatewayConnection implements EWrapper {
     public void openOrder(int orderId, Contract contract, Order order, OrderState orderState) {
         var symbol = contract.symbol() + contract.currency();
         openOrderMap.put(orderId, new OpenOrderInfo(orderId, symbol,
-                order.action(), order.getOrderType(),
+                order.action().getApiString(), order.getOrderType(),
                 order.lmtPrice(), order.totalQuantity().value().doubleValue(),
-                orderState.status()));
+                orderState.status().name()));
     }
 
     @Override
@@ -287,7 +288,7 @@ public class IbGatewayConnection implements EWrapper {
     public void error(String str) { log.warn("[IB] {}", str); }
 
     @Override
-    public void error(int id, int errorCode, String errorMsg, String advancedOrderRejectJson) {
+    public void error(int id, long reqId, int errorCode, String errorMsg, String advancedOrderRejectJson) {
         // 2104/2106/2158 = market data farm connected (info, not errors)
         if (errorCode == 2104 || errorCode == 2106 || errorCode == 2158) {
             log.debug("[IB] Info {}: {}", errorCode, errorMsg);
@@ -307,83 +308,4 @@ public class IbGatewayConnection implements EWrapper {
         scheduleReconnect();
     }
 
-    // ── EWrapper no-ops ──────────────────────────────────────────────────────
-
-    @Override public void tickOptionComputation(int i, int i1, int i2, double v, double v1, double v2, double v3, double v4, double v5, double v6, double v7) {}
-    @Override public void tickGeneric(int i, int i1, double v) {}
-    @Override public void tickString(int i, int i1, String s) {}
-    @Override public void tickEFP(int i, int i1, double v, String s, double v1, int i2, String s1, double v2, double v3) {}
-    @Override public void tickSnapshotEnd(int i) {}
-    @Override public void tickReqParams(int i, double v, String s, int i1) {}
-    @Override public void updateAccountValue(String s, String s1, String s2, String s3) {}
-    @Override public void updatePortfolio(Contract c, Decimal d, double v, double v1, double v2, double v3, double v4, String s) {}
-    @Override public void updateAccountTime(String s) {}
-    @Override public void accountDownloadEnd(String s) {}
-    @Override public void execDetails(int i, Contract c, Execution e) {}
-    @Override public void execDetailsEnd(int i) {}
-    @Override public void updateMktDepth(int i, int i1, int i2, int i3, double v, Decimal d) {}
-    @Override public void updateMktDepthL2(int i, int i1, String s, int i2, int i3, double v, Decimal d, boolean b) {}
-    @Override public void updateNewsBulletin(int i, int i1, String s, String s1) {}
-    @Override public void managedAccounts(String s) {}
-    @Override public void receiveFA(int i, String s) {}
-    @Override public void historicalData(int i, Bar b) {}
-    @Override public void historicalDataEnd(int i, String s, String s1) {}
-    @Override public void historicalDataUpdate(int i, Bar b) {}
-    @Override public void scannerParameters(String s) {}
-    @Override public void scannerData(int i, int i1, ContractDetails c, String s, String s1, String s2, String s3) {}
-    @Override public void scannerDataEnd(int i) {}
-    @Override public void realtimeBar(int i, long l, double v, double v1, double v2, double v3, Decimal d, Decimal d1, int i1) {}
-    @Override public void currentTime(long l) {}
-    @Override public void fundamentalData(int i, String s) {}
-    @Override public void deltaNeutralValidation(int i, DeltaNeutralContract d) {}
-    @Override public void commissionReport(CommissionReport c) {}
-    @Override public void position(String s, Contract c, Decimal d, double v) {}
-    @Override public void positionEnd() {}
-    @Override public void accountUpdateMulti(int i, String s, String s1, String s2, String s3, String s4) {}
-    @Override public void accountUpdateMultiEnd(int i) {}
-    @Override public void securityDefinitionOptionalParameter(int i, String s, int i1, String s1, String s2, Set<String> set, Set<Double> set1) {}
-    @Override public void securityDefinitionOptionalParameterEnd(int i) {}
-    @Override public void softDollarTiers(int i, SoftDollarTier[] t) {}
-    @Override public void familyCodes(FamilyCode[] f) {}
-    @Override public void symbolSamples(int i, ContractDescription[] c) {}
-    @Override public void mktDepthExchanges(DepthMktDataDescription[] d) {}
-    @Override public void tickNews(int i, long l, String s, String s1, String s2, String s3) {}
-    @Override public void smartComponents(int i, Map<Integer, Map.Entry<String, Character>> m) {}
-    @Override public void newsArticle(int i, int i1, String s) {}
-    @Override public void newsProviders(NewsProvider[] n) {}
-    @Override public void historicalNews(int i, String s, String s1, String s2, String s3) {}
-    @Override public void historicalNewsEnd(int i, boolean b) {}
-    @Override public void headTimestamp(int i, String s) {}
-    @Override public void histogramData(int i, List<HistogramEntry> l) {}
-    @Override public void rerouteMktDataReq(int i, int i1, String s) {}
-    @Override public void rerouteMktDepthReq(int i, int i1, String s) {}
-    @Override public void marketRule(int i, PriceIncrement[] p) {}
-    @Override public void pnl(int i, double v, double v1, double v2) {}
-    @Override public void pnlSingle(int i, Decimal d, double v, double v1, double v2, double v3) {}
-    @Override public void historicalTicks(int i, List<HistoricalTick> l, boolean b) {}
-    @Override public void historicalTicksBidAsk(int i, List<HistoricalTickBidAsk> l, boolean b) {}
-    @Override public void historicalTicksLast(int i, List<HistoricalTickLast> l, boolean b) {}
-    @Override public void tickByTickAllLast(int i, int i1, long l, double v, Decimal d, TickAttrib t, String s, String s1) {}
-    @Override public void tickByTickBidAsk(int i, long l, double v, double v1, Decimal d, Decimal d1, TickAttribBidAsk t) {}
-    @Override public void tickByTickMidPoint(int i, long l, double v) {}
-    @Override public void orderBound(long l, int i, int i1) {}
-    @Override public void completedOrder(Contract c, Order o, OrderState s) {}
-    @Override public void completedOrdersEnd() {}
-    @Override public void replaceFAEnd(int i, String s) {}
-    @Override public void wshMetaData(int i, String s) {}
-    @Override public void wshEventData(int i, String s) {}
-    @Override public void historicalSchedule(int i, String s, String s1, String s2, List<HistoricalSession> l) {}
-    @Override public void userInfo(int i, String s) {}
-    @Override public void contractDetails(int i, ContractDetails c) {}
-    @Override public void contractDetailsEnd(int i) {}
-    @Override public void bondContractDetails(int i, ContractDetails c) {}
-    @Override public void verifyMessageAPI(String s) {}
-    @Override public void verifyCompleted(boolean b, String s) {}
-    @Override public void verifyAndAuthMessageAPI(String s, String s1) {}
-    @Override public void verifyAndAuthCompleted(boolean b, String s) {}
-    @Override public void displayGroupList(int i, String s) {}
-    @Override public void displayGroupUpdated(int i, String s) {}
-    @Override public void positionMulti(int i, String s, String s1, Contract c, Decimal d, double v) {}
-    @Override public void positionMultiEnd(int i) {}
-    @Override public void marketDataType(int i, int i1) {}
 }
