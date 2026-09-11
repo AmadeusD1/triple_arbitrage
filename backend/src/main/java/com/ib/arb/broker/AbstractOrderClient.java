@@ -4,7 +4,9 @@ import com.ib.arb.repository.ExchangeConfigRepository;
 import com.ib.arb.repository.SettingRepository;
 import static com.ib.arb.common.Constants.Simulation.SIMULATION_MODE_KEY;
 
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Base class for exchange order clients.
@@ -16,6 +18,7 @@ public abstract class AbstractOrderClient implements OrderClient {
     protected final SettingRepository settings;
     protected final ExchangeConfigRepository configRepo;
     protected final AtomicInteger openOrders = new AtomicInteger(0);
+    private final AtomicReference<String> lastError = new AtomicReference<>();
 
     protected AbstractOrderClient(SettingRepository settings, ExchangeConfigRepository configRepo) {
         this.settings = settings;
@@ -58,5 +61,15 @@ public abstract class AbstractOrderClient implements OrderClient {
     @Override
     public boolean isConnected() {
         return isSimulation() || (!apiKey().isBlank() && !apiSecret().isBlank());
+    }
+
+    /** Records a critical error from {@code sendOrder()} for {@link #consumeError()} to surface. */
+    protected void reportError(String message) {
+        lastError.set(message);
+    }
+
+    @Override
+    public Optional<String> consumeError() {
+        return Optional.ofNullable(lastError.getAndSet(null));
     }
 }

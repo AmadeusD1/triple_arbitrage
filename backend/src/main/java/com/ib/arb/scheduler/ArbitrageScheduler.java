@@ -2,6 +2,7 @@ package com.ib.arb.scheduler;
 
 import com.ib.arb.config.DashboardWebSocketHandler;
 import com.ib.arb.engine.ExchangeManager;
+import jakarta.annotation.PostConstruct;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -20,7 +21,13 @@ public class ArbitrageScheduler {
         this.wsHandler       = wsHandler;
     }
 
-    @Scheduled(fixedDelayString = "${arb.broadcast-interval-ms:1000}")
+    @PostConstruct
+    public void wireRealTimeBroadcast() {
+        exchangeManager.setFeedUpdateCallback(wsHandler::scheduleBroadcast);
+    }
+
+    /** Heartbeat fallback — keeps the dashboard alive even when no prices change. */
+    @Scheduled(fixedDelayString = "${arb.broadcast-interval-ms:5000}")
     public void broadcastCycle() {
         wsHandler.broadcast();
     }

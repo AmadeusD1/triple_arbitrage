@@ -32,6 +32,7 @@ public class BitstampOrderBookFeed implements OrderBookFeed {
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ScheduledExecutorService reconnectScheduler = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, OrderBook> snapshots = new ConcurrentHashMap<>();
+    private volatile Runnable onUpdate = () -> {};
 
     private volatile boolean connected = false;
     private volatile List<String> subscribedPairs = List.of();
@@ -44,6 +45,7 @@ public class BitstampOrderBookFeed implements OrderBookFeed {
     @Override public Exchange getExchange() { return Exchange.BITSTAMP; }
     @Override public OrderBook getSnapshot(String pair) { return snapshots.get(pair.toUpperCase()); }
     @Override public boolean isConnected() { return connected; }
+    @Override public void setOnUpdate(Runnable onUpdate) { this.onUpdate = onUpdate; }
 
     @Override
     public void subscribe(List<String> pairs) {
@@ -96,6 +98,7 @@ public class BitstampOrderBookFeed implements OrderBookFeed {
 
             if (bid > 0 && ask > 0) {
                 snapshots.put(pair, new OrderBook(pair, bid, bidQty, ask, askQty));
+                onUpdate.run();
             }
         } catch (Exception ignored) {}
     }

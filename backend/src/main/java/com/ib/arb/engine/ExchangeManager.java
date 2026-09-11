@@ -1,5 +1,6 @@
 package com.ib.arb.engine;
 
+import com.ib.arb.broker.OrderClient;
 import com.ib.arb.marketdata.Exchange;
 import com.ib.arb.marketdata.OrderBookFeed;
 import com.ib.arb.repository.ExchangeConfigRepository;
@@ -39,6 +40,7 @@ public class ExchangeManager {
 
     private final AutoTrader autoTrader;
     private final List<OrderBookFeed> feeds;
+    private final List<OrderClient> orderClients;
     private final ExchangeConfigRepository configRepo;
     private final TriangleConfigRepository triangleRepo;
 
@@ -51,12 +53,15 @@ public class ExchangeManager {
 
     private final Map<Exchange, ScheduledFuture<?>> scanFutures = new ConcurrentHashMap<>();
     private final AtomicBoolean globallyStarted = new AtomicBoolean(false);
+    private volatile Runnable feedUpdateCallback = null;
 
     public ExchangeManager(AutoTrader autoTrader, List<OrderBookFeed> feeds,
+                           List<OrderClient> orderClients,
                            ExchangeConfigRepository configRepo,
                            TriangleConfigRepository triangleRepo) {
         this.autoTrader   = autoTrader;
         this.feeds        = feeds;
+        this.orderClients = orderClients;
         this.configRepo   = configRepo;
         this.triangleRepo = triangleRepo;
     }
@@ -77,6 +82,11 @@ public class ExchangeManager {
 
     public boolean isGloballyRunning() { return globallyStarted.get(); }
 
+    public void setFeedUpdateCallback(Runnable callback) {
+        this.feedUpdateCallback = callback;
+        feeds.forEach(f -> f.setOnUpdate(callback));
+    }
+
     // ── Per-exchange start/stop (Exchange Settings tab) ───────────────────────
 
     public void startExchange(Exchange exchange) {
@@ -84,10 +94,17 @@ public class ExchangeManager {
             log.debug("[EM] {} already running", exchange);
             return;
         }
+        autoTrader.clearExchangeAlert(exchange);
         subscribeFeeds(exchange);
         var future = executor.scheduleWithFixedDelay(
             () -> {
-                try { autoTrader.attemptArbitrage(exchange); }
+                try {
+                    autoTrader.attemptArbitrage(exchange);
+                    if (autoTrader.getExchangeAlert(exchange).isPresent()) {
+                        log.error("[EM] Halting scan loop for {} due to reported alert", exchange);
+                        stopExchange(exchange);
+                    }
+                }
                 catch (Exception e) { log.error("[EM] Scan error on {}", exchange, e); }
             },
             0, scanIntervalMs, TimeUnit.MILLISECONDS);
@@ -136,6 +153,16 @@ public class ExchangeManager {
         return result;
     }
 
+    /** Per-exchange critical alerts (e.g. precision-error halts) — only present when an
+     *  exchange has been auto-stopped due to a live order rejection. */
+    public Map<String, String> exchangeAlerts() {
+        var result = new ConcurrentHashMap<String, String>();
+        for (var exchange : Exchange.values()) {
+            autoTrader.getExchangeAlert(exchange).ifPresent(msg -> result.put(exchange.name(), msg));
+        }
+        return result;
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private List<Exchange> enabledExchanges() {
@@ -163,10 +190,15 @@ public class ExchangeManager {
             return;
         }
 
+        orderClients.stream()
+            .filter(c -> c.getExchange() == exchange)
+            .findFirst()
+            .ifPresent(c -> c.warmPrecision(pairs));
+
         feeds.stream()
             .filter(f -> f.getExchange() == exchange)
             .forEach(f -> {
-                if (f.isConnected()) return;
+                if (feedUpdateCallback != null) f.setOnUpdate(feedUpdateCallback);
                 f.subscribe(pairs);
                 log.info("[EM] Subscribed {} feed to {} pair(s)", exchange, pairs.size());
             });

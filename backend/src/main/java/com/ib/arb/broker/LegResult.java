@@ -10,6 +10,7 @@ package com.ib.arb.broker;
  * @param volume    quantity in base currency units
  * @param filled    {@code true} if the exchange accepted the order
  * @param orderId   exchange transaction ID; {@code null} for simulation/failed legs
+ * @param rejectionReason exchange's stated reason for rejection; {@code null} on success or when unavailable
  */
 public record LegResult(int legIndex, String pair, String direction,
-                        double price, double volume, boolean filled, String orderId) {}
+                        double price, double volume, boolean filled, String orderId, String rejectionReason) {}

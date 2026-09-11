@@ -39,45 +39,57 @@ public class BybitPositionClient implements PositionClient {
 
     @Override
     public Map<String, Double> fetchBalances() {
+        var cfg = configRepo.findByExchange("BYBIT").orElse(null);
+        if (cfg == null || cfg.getApiKey() == null || cfg.getApiKey().isBlank()) return Map.of();
+
+        // Retried because the startup call can land in a brief window where outbound
+        // HTTPS intermittently fails while the JVM's network stack settles.
         String rawBody = null;
-        try {
-            var cfg = configRepo.findByExchange("BYBIT").orElse(null);
-            if (cfg == null || cfg.getApiKey() == null || cfg.getApiKey().isBlank()) return Map.of();
+        Exception lastError = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            rawBody = null;
+            try {
+                var ts    = String.valueOf(System.currentTimeMillis());
+                var query = "accountType=UNIFIED";
+                var sign  = sign(ts, cfg.getApiKey(), RECV_WINDOW, query, cfg.getApiSecret());
 
-            var ts    = String.valueOf(System.currentTimeMillis());
-            var query = "accountType=SPOT";
-            var sign  = sign(ts, cfg.getApiKey(), RECV_WINDOW, query, cfg.getApiSecret());
+                var request = HttpRequest.newBuilder()
+                    .uri(URI.create(BASE_URL + "/v5/account/wallet-balance?" + query))
+                    .header("X-BAPI-API-KEY",      cfg.getApiKey())
+                    .header("X-BAPI-SIGN",         sign)
+                    .header("X-BAPI-SIGN-TYPE",    "2")
+                    .header("X-BAPI-TIMESTAMP",    ts)
+                    .header("X-BAPI-RECV-WINDOW",  RECV_WINDOW)
+                    .GET()
+                    .build();
 
-            var request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URL + "/v5/account/wallet-balance?" + query))
-                .header("X-BAPI-API-KEY",      cfg.getApiKey())
-                .header("X-BAPI-SIGN",         sign)
-                .header("X-BAPI-SIGN-TYPE",    "2")
-                .header("X-BAPI-TIMESTAMP",    ts)
-                .header("X-BAPI-RECV-WINDOW",  RECV_WINDOW)
-                .GET()
-                .build();
+                rawBody = http.send(request, HttpResponse.BodyHandlers.ofString()).body();
+                var root = mapper.readTree(rawBody);
+                if (root.path("retCode").asInt() != 0) {
+                    log.error("[BYBIT] fetchBalances error: {}", root.path("retMsg").asText());
+                    return Map.of();
+                }
 
-            rawBody = http.send(request, HttpResponse.BodyHandlers.ofString()).body();
-            var root = mapper.readTree(rawBody);
-            if (root.path("retCode").asInt() != 0) {
-                log.error("[BYBIT] fetchBalances error: {}", root.path("retMsg").asText());
-                return Map.of();
+                var balances = new ConcurrentHashMap<String, Double>();
+                var coins = root.path("result").path("list").get(0).path("coin");
+                for (var coin : coins) {
+                    var asset = coin.path("coin").asText();
+                    var bal   = coin.path("walletBalance").asDouble();
+                    if (bal > 0) balances.put(asset, bal);
+                }
+                return balances;
+            } catch (Exception e) {
+                lastError = e;
+                if (attempt < 3) {
+                    try { Thread.sleep(1000); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); return Map.of(); }
+                }
             }
-
-            var balances = new ConcurrentHashMap<String, Double>();
-            var coins = root.path("result").path("list").get(0).path("coin");
-            for (var coin : coins) {
-                var asset = coin.path("coin").asText();
-                var bal   = coin.path("walletBalance").asDouble();
-                if (bal > 0) balances.put(asset, bal);
-            }
-            return balances;
-        } catch (Exception e) {
-            log.error("[BYBIT] fetchBalances failed: {} | raw='{}'", e.getMessage(),
-                rawBody != null ? rawBody.substring(0, Math.min(200, rawBody.length())) : "null");
-            return Map.of();
         }
+        log.error("[BYBIT] fetchBalances failed after 3 attempts: {}: {} | raw='{}'",
+            lastError.getClass().getSimpleName(), lastError.getMessage(),
+            rawBody != null ? rawBody.substring(0, Math.min(200, rawBody.length())) : "null");
+        return Map.of();
     }
 
     @Override
@@ -112,6 +124,7 @@ public class BybitPositionClient implements PositionClient {
                 // EURUSDT → EURUSD
                 var pair = symbol.endsWith("USDT") ? symbol.substring(0, symbol.length() - 1) : symbol;
                 orders.add(new OpenOrder(
+                    "BYBIT",
                     o.path("orderId").asText(),
                     pair,
                     o.path("side").asText().toLowerCase(),

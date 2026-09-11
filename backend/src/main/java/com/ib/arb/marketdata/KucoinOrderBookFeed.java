@@ -38,6 +38,7 @@ public class KucoinOrderBookFeed implements OrderBookFeed {
     private final ScheduledExecutorService reconnectScheduler = Executors.newSingleThreadScheduledExecutor();
     private final ScheduledExecutorService pingScheduler      = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, OrderBook> snapshots = new ConcurrentHashMap<>();
+    private volatile Runnable onUpdate = () -> {};
 
     private volatile boolean connected = false;
     private volatile List<String> subscribedPairs = List.of();
@@ -50,11 +51,26 @@ public class KucoinOrderBookFeed implements OrderBookFeed {
     @Override public Exchange getExchange() { return Exchange.KUCOIN; }
     @Override public OrderBook getSnapshot(String pair) { return snapshots.get(pair.toUpperCase()); }
     @Override public boolean isConnected() { return connected; }
+    @Override public void setOnUpdate(Runnable onUpdate) { this.onUpdate = onUpdate; }
 
     @Override
     public void subscribe(List<String> pairs) {
         this.subscribedPairs = pairs;
-        connect();
+        if (connected && activeWs != null) {
+            activeWs.sendText(buildSubscribe(), true);
+        } else {
+            connect();
+        }
+    }
+
+    @Override
+    public void disconnect() {
+        connected = false;
+        var ws = activeWs;
+        activeWs = null;
+        if (ws != null) {
+            try { ws.abort(); } catch (Exception ignored) {}
+        }
     }
 
     /** Convert BTCUSDT → BTC-USDT for KuCoin */
@@ -118,6 +134,7 @@ public class KucoinOrderBookFeed implements OrderBookFeed {
 
             if (bid > 0 && ask > 0) {
                 snapshots.put(pair, new OrderBook(pair, bid, bidQty, ask, askQty));
+                onUpdate.run();
             }
         } catch (Exception ignored) {}
     }

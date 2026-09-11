@@ -94,6 +94,7 @@ public class KucoinPositionClient implements PositionClient {
             var root   = mapper.readTree(http.send(request, HttpResponse.BodyHandlers.ofString()).body());
             var orders = new ArrayList<OpenOrder>();
             root.path("data").path("items").forEach(o -> orders.add(new OpenOrder(
+                "KUCOIN",
                 o.path("id").asText(),
                 o.path("symbol").asText().replace("-", "").toUpperCase(),
                 o.path("side").asText().toLowerCase(),

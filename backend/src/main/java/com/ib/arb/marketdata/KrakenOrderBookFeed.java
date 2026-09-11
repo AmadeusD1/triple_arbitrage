@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 public class KrakenOrderBookFeed implements OrderBookFeed {
@@ -31,6 +32,7 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
     private String wsUrl;
 
     private final Map<String, OrderBook> snapshots = new ConcurrentHashMap<>();
+    private volatile Runnable onUpdate = () -> {};
     // bids: highest price first; asks: lowest price first
     private final Map<String, TreeMap<Double, Double>> bidBooks = new ConcurrentHashMap<>();
     private final Map<String, TreeMap<Double, Double>> askBooks = new ConcurrentHashMap<>();
@@ -40,6 +42,7 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
     private volatile List<String> subscribedPairs = List.of();
     private volatile WebSocket activeWs = null;
     private final AtomicBoolean connecting = new AtomicBoolean(false);
+    private final AtomicLong lastMessageTime = new AtomicLong(0);
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newHttpClient();
@@ -55,11 +58,14 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
         return snapshots.get(pair);
     }
 
+    @Override public void setOnUpdate(Runnable onUpdate) { this.onUpdate = onUpdate; }
+
     @Override
     public void subscribe(List<String> pairs) {
         stopped = false;
         this.subscribedPairs = pairs;
         connect();
+        reconnectScheduler.scheduleAtFixedRate(this::keepAlive, 30, 30, TimeUnit.SECONDS);
     }
 
     @Override
@@ -105,11 +111,45 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
         if (!stopped) reconnectScheduler.schedule(this::connect, 2, TimeUnit.SECONDS);
     }
 
+    @Override
+    public void invalidate(String pair) {
+        snapshots.remove(pair);
+        bidBooks.remove(pair);
+        askBooks.remove(pair);
+    }
+
+    private void touchSnapshots() {
+        snapshots.replaceAll((p, ob) -> ob.touched());
+    }
+
+    private void keepAlive() {
+        if (stopped) return;
+        var ws = activeWs;
+        if (connected && ws != null) {
+            long elapsed = System.currentTimeMillis() - lastMessageTime.get();
+            if (lastMessageTime.get() > 0 && elapsed > 60_000) {
+                log.warn("[KRAKEN] No messages for {}s — reconnecting", elapsed / 1000);
+                try { ws.abort(); } catch (Exception ignored) {}
+                scheduleReconnect();
+                return;
+            }
+            try { ws.sendText("{\"method\":\"ping\"}", true); } catch (Exception ignored) {}
+        }
+    }
+
     private void handleMessage(String json) {
         try {
+            lastMessageTime.set(System.currentTimeMillis());
             var node = mapper.readTree(json);
 
-            if ("subscribe".equals(node.path("method").asText())
+            var channel = node.path("channel").asText();
+            var method  = node.path("method").asText();
+            if ("heartbeat".equals(channel) || "pong".equals(method)) {
+                touchSnapshots();
+                return;
+            }
+
+            if ("subscribe".equals(method)
                     && !node.path("success").asBoolean(true)) {
                 log.warn("Kraken subscription failed — pair '{}': {}",
                     node.path("symbol").asText("unknown"),
@@ -117,7 +157,7 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
                 return;
             }
 
-            if (!"book".equals(node.path("channel").asText())) return;
+            if (!"book".equals(channel)) return;
 
             var type = node.path("type").asText();
             if (!"snapshot".equals(type) && !"update".equals(type)) return;
@@ -146,9 +186,12 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
                 var bestBid = bidBook.firstEntry();
                 var bestAsk = askBook.firstEntry();
                 if (bestBid != null && bestAsk != null) {
-                    snapshots.put(pair, new OrderBook(pair,
-                        bestBid.getKey(), bestBid.getValue(),
-                        bestAsk.getKey(), bestAsk.getValue()));
+                    var ob = new OrderBook(pair, bestBid.getKey(), bestBid.getValue(), bestAsk.getKey(), bestAsk.getValue());
+                    if (ob.isValid()) {
+                        snapshots.put(pair, ob);
+                        onUpdate.run();
+                    }
+                    // crossed books are transient during fast updates — keep last valid snapshot
                 }
             }
         } catch (Exception ignored) {}
@@ -180,12 +223,25 @@ public class KrakenOrderBookFeed implements OrderBookFeed {
         }
     }
 
-    // "EURUSD" → "EUR/USD"  (splits at position 3)
+    // Longest-first so "USDT" matches before "USD", "USDC" before "USD", etc.
+    // Mirrors AutoTrader.QUOTE_SUFFIXES — needed because a plain first-3-chars split
+    // mangles 4+ letter base currencies (e.g. "DOGEBTC" → "DOG/EBTC").
+    private static final List<String> QUOTE_SUFFIXES = List.of(
+        "USDT", "USDC", "BUSD", "EUR", "GBP", "JPY", "TRY", "USD", "BTC", "ETH"
+    );
+
+    // "BTCUSD" → "BTC/USD", "ETHBTC" → "ETH/BTC", "DOGEBTC" → "DOGE/BTC"
+    // Kraken v2 WS API (wss://ws.kraken.com/v2) uses BTC, not XBT.
     public static String toKrakenSymbol(String pair) {
-        return pair.substring(0, 3) + "/" + pair.substring(3);
+        var norm = pair.toUpperCase();
+        for (var q : QUOTE_SUFFIXES) {
+            if (norm.endsWith(q) && norm.length() > q.length())
+                return norm.substring(0, norm.length() - q.length()) + "/" + q;
+        }
+        return norm.substring(0, 3) + "/" + norm.substring(3);
     }
 
-    // "EUR/USD" → "EURUSD"
+    // "BTC/USD" → "BTCUSD", "ETH/BTC" → "ETHBTC"
     static String toPair(String krakenSymbol) {
         return krakenSymbol.replace("/", "");
     }

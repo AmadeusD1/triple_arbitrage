@@ -25,6 +25,11 @@ public class Trade {
     private Double realProfit;
     private Double realProfitPercent;
     private String exchange;
+    private Double profitPercent;
+    private Integer triangleDisplayOrder;
+    private String pair1;
+    private String pair2;
+    private String pair3;
 
     @OneToMany(mappedBy = "trade", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<TradeLeg> legs = new ArrayList<>();
@@ -41,6 +46,11 @@ public class Trade {
     public Double getRealProfit() { return realProfit; }
     public Double getRealProfitPercent() { return realProfitPercent; }
     public String getExchange() { return exchange; }
+    public Double getProfitPercent() { return profitPercent; }
+    public Integer getTriangleDisplayOrder() { return triangleDisplayOrder; }
+    public String getPair1() { return pair1; }
+    public String getPair2() { return pair2; }
+    public String getPair3() { return pair3; }
     @JsonIgnore public List<TradeLeg> getLegs() { return legs; }
 
     public Trade setTime(LocalDateTime time)                   { this.time = time;                         return this; }
@@ -54,6 +64,11 @@ public class Trade {
     public Trade setRealProfit(Double realProfit)              { this.realProfit = realProfit;             return this; }
     public Trade setRealProfitPercent(Double realProfitPercent){ this.realProfitPercent = realProfitPercent; return this; }
     public Trade setExchange(String exchange)                  { this.exchange = exchange;                   return this; }
+    public Trade setProfitPercent(Double profitPercent)        { this.profitPercent = profitPercent;         return this; }
+    public Trade setTriangleDisplayOrder(Integer triangleDisplayOrder) { this.triangleDisplayOrder = triangleDisplayOrder; return this; }
+    public Trade setPair1(String pair1) { this.pair1 = pair1; return this; }
+    public Trade setPair2(String pair2) { this.pair2 = pair2; return this; }
+    public Trade setPair3(String pair3) { this.pair3 = pair3; return this; }
 
     public Trade addLeg(TradeLeg leg) {
         legs.add(leg);

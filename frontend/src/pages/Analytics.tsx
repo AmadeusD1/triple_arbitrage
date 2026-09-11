@@ -20,6 +20,9 @@ const CLOCK_EMOJIS = Array.from({ length: 24 }, (_, h) => {
   return h12 === 0 ? '\u{1F55B}' : String.fromCodePoint(0x1F54F + h12);
 });
 
+const n  = (v: unknown, d: number) => (isFinite(Number(v)) ? Number(v) : 0).toFixed(d);
+const sp = (v: unknown) => { const x = Number(v); return isFinite(x) ? x : 0; };
+
 const TZ = 'America/Chicago';
 const WEEKDAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
@@ -88,7 +91,7 @@ export default function Analytics() {
     const m: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
     for (const t of filtered) {
       const d = parseUTC(t.time);
-      m[chicagoDayIndex(d)][chicagoHour(d)] += t.pnl;
+      m[chicagoDayIndex(d)][chicagoHour(d)] += sp(t.pnl);
     }
     return m;
   }, [filtered]);
@@ -106,7 +109,7 @@ export default function Analytics() {
     return `rgb(${r},${g},${b})`;
   };
 
-  const totalPnl = useMemo(() => filtered.reduce((s, t) => s + t.pnl, 0), [filtered]);
+  const totalPnl = useMemo(() => filtered.reduce((s, t) => s + sp(t.pnl), 0), [filtered]);
 
   const pnlCellColor = (pnl: number): string => {
     if (pnl <= 0) return 'rgba(255,255,255,0.05)';
@@ -268,7 +271,7 @@ export default function Analytics() {
           <Typography variant="subtitle2" sx={{ mb: 2, color: 'text.secondary' }}>
             Profit Heatmap
             <Box component="span" sx={{ ml: 1, fontWeight: 400 }}>
-              (total ${totalPnl.toFixed(2)})
+              (total ${n(totalPnl, 2)})
             </Box>
           </Typography>
 
@@ -306,7 +309,7 @@ export default function Analytics() {
                     return (
                       <Tooltip
                         key={h}
-                        title={`${day} ${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00 · ${sign}$${pnl.toFixed(2)}`}
+                        title={`${day} ${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00 · ${sign}$${n(pnl, 2)}`}
                         placement="top"
                         arrow
                       >
@@ -346,7 +349,7 @@ export default function Analytics() {
             ))}
             <Typography variant="caption" color="text.secondary">More</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
-              Peak: ${maxPnl.toFixed(2)} / hour slot
+              Peak: ${n(maxPnl, 2)} / hour slot
             </Typography>
           </Box>
         </Paper>

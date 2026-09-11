@@ -12,6 +12,7 @@ export interface TradeLeg {
   volume: number;
   status: LegStatus;
   orderId: string | null;
+  quoteRate: number | null;
 }
 
 export interface Trade {
@@ -27,6 +28,11 @@ export interface Trade {
   expectedPnl: number;
   realProfit: number | null;
   realProfitPercent: number | null;
+  profitPercent: number | null;
+  triangleDisplayOrder: number | null;
+  pair1: string | null;
+  pair2: string | null;
+  pair3: string | null;
 }
 
 export interface TradeDetail extends Trade {
@@ -79,6 +85,7 @@ export interface DashboardSnapshot {
   fxRates: Record<string, number>;
   recentMissedOpportunities: MissedOpportunity[];
   exchangeRunning: Record<string, boolean>;
+  exchangeAlerts: Record<string, string>;
 }
 
 export interface EquityPoint {
@@ -145,6 +152,7 @@ export interface ExchangeConfig {
 }
 
 export interface OpenOrder {
+  exchange: string;
   txid: string;
   pair: string;
   side: string;
@@ -156,10 +164,40 @@ export interface OpenOrder {
   status: string;
 }
 
+export interface CancelOrderResponse {
+  success: boolean;
+  message: string | null;
+}
+
+export interface ManualOrderRequest {
+  exchange: string;
+  pair: string;
+  orderType: 'LIMIT' | 'MARKET';
+  side: 'BID' | 'ASK';
+  quantity: number;
+  limitPrice: number | null;
+}
+
+export interface ManualOrderResponse {
+  success: boolean;
+  orderId: string | null;
+  pair: string;
+  direction: string;
+  quantity: number;
+  price: number | null;
+  rejectionReason: string | null;
+}
+
+export interface ManualTradePrecision {
+  priceDecimals: number;
+  qtyDecimals: number;
+}
+
 export type TriangleStatus = 'ACTIVE' | 'INACTIVE';
 
 export interface TriangleConfig {
   id: number;
+  displayOrder: number;
   exchange: string;
   pair1: string;
   pair2: string;
@@ -170,4 +208,7 @@ export interface TriangleConfig {
   hits: number;
   totalProfitUsd: number;
   cycle: string;
+  staleMs1: number;
+  staleMs2: number;
+  staleMs3: number;
 }

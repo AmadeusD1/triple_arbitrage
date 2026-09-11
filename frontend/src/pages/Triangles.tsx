@@ -17,16 +17,19 @@ import {
 } from '../api/rest';
 import type { CycleDirection, ExchangeConfig, OrderLeg, PriceSnapshot, TriangleConfig, TriangleStatus } from '../types';
 
+const n = (v: unknown, d: number) => (isFinite(Number(v)) ? Number(v) : 0).toFixed(d);
+
 interface Props { prices: PriceSnapshot[]; exchangeRunning: Record<string, boolean> }
 
 type TrianglePayload = Omit<TriangleConfig, 'id' | 'hits' | 'totalProfitUsd'>;
 type ExchangePayload = Omit<ExchangeConfig, 'id' | 'createdAt'>;
 
-const KNOWN_EXCHANGES = ['KRAKEN', 'BINANCE', 'BITSTAMP', 'COINBASE', 'BITFINEX', 'HTX', 'KUCOIN', 'BYBIT'];
+const KNOWN_EXCHANGES = ['KRAKEN', 'BINANCE', 'BITSTAMP', 'COINBASE', 'BITFINEX', 'HTX', 'KUCOIN', 'BYBIT', 'IB', 'BTCTURK', 'EXMO'];
 
 const EMPTY_TRI: TrianglePayload = {
   exchange: 'KRAKEN', pair1: '', pair2: '', pair3: '',
-  minProfitUsd: 10, minProfitPercent: 0.01, status: 'ACTIVE', cycle: 'BBS',
+  minProfitUsd: 10, minProfitPercent: 0.01, status: 'INACTIVE', cycle: 'BBS',
+  staleMs1: 10_000, staleMs2: 10_000, staleMs3: 10_000,
 };
 
 const EMPTY_EX: ExchangePayload = {
@@ -85,8 +88,9 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
   const [exForm, setExForm] = useState<ExchangePayload>(EMPTY_EX);
 
   const [snack, setSnack] = useState<SnackState>({ open: false, message: '', severity: 'success' });
+  const [triSaveAttempted, setTriSaveAttempted] = useState(false);
 
-  const loadTriangles = () => getTriangles().then(r => setTriangles(r.data.slice().sort((a, b) => a.id - b.id)));
+  const loadTriangles = () => getTriangles().then(r => setTriangles(r.data.slice().sort((a, b) => a.displayOrder - b.displayOrder)));
   const loadExchanges = () => getExchangeConfigs().then(r => setExchanges(r.data.slice().sort((a, b) => a.exchange.localeCompare(b.exchange))));
 
   useEffect(() => { void loadTriangles(); void loadExchanges(); }, []);
@@ -143,7 +147,7 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
       const res = await manualTrade(tradeTarget.id, tradeCycle, legs);
       const { status, pnl } = res.data;
       const severity = status === 'FILLED' ? 'success' : status === 'SIMULATION' ? 'info' : 'error';
-      const label    = (status === 'FILLED' || status === 'SIMULATION') ? `Trade ${status} — PnL: $${pnl.toFixed(2)}` : `Trade ${status}`;
+      const label    = (status === 'FILLED' || status === 'SIMULATION') ? `Trade ${status} — PnL: $${n(pnl, 2)}` : `Trade ${status}`;
       setSnack({ open: true, message: label, severity });
     } catch {
       setSnack({ open: true, message: 'Trade request failed', severity: 'error' });
@@ -151,14 +155,21 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
     setTradeTarget(null);
     void loadTriangles();
   };
-  const openCreateTri = () => { setEditingTriId(null); setTriForm(EMPTY_TRI); setTriDialogOpen(true); };
+  const openCreateTri = () => { setEditingTriId(null); setTriForm(EMPTY_TRI); setTriSaveAttempted(false); setTriDialogOpen(true); };
   const openEditTri   = (t: TriangleConfig) => {
     setEditingTriId(t.id);
     setTriForm({ exchange: t.exchange, pair1: t.pair1, pair2: t.pair2, pair3: t.pair3,
-                 minProfitUsd: t.minProfitUsd, minProfitPercent: t.minProfitPercent, status: t.status, cycle: t.cycle });
+                 minProfitUsd: t.minProfitUsd, minProfitPercent: t.minProfitPercent, status: t.status, cycle: t.cycle,
+                 staleMs1: t.staleMs1 ?? 10_000, staleMs2: t.staleMs2 ?? 10_000, staleMs3: t.staleMs3 ?? 10_000 });
+    setTriSaveAttempted(false);
     setTriDialogOpen(true);
   };
+  const triFormValid = () =>
+    triForm.pair1.trim() !== '' && triForm.pair2.trim() !== '' && triForm.pair3.trim() !== '' &&
+    !!triForm.exchange && !!triForm.cycle;
   const handleSaveTri = async () => {
+    setTriSaveAttempted(true);
+    if (!triFormValid()) return;
     if (editingTriId == null) await createTriangle(triForm); else await updateTriangle(editingTriId, triForm);
     setTriDialogOpen(false); void loadTriangles();
   };
@@ -275,6 +286,7 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
           <Table size="small" sx={{ minWidth: 380 }}>
             <TableHead>
               <TableRow>
+                <TableCell align="right" sx={{ width: 36, color: 'text.secondary' }}>#</TableCell>
                 <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Exchange</TableCell>
                 <TableCell>Pairs</TableCell>
                 <TableCell>Cycle</TableCell>
@@ -289,6 +301,7 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
             <TableBody>
               {triangles.map((t) => (
                 <TableRow key={t.id}>
+                  <TableCell align="right" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>{t.displayOrder}</TableCell>
                   <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>{t.exchange}</TableCell>
                   <TableCell><Chip label={`${t.pair1} / ${t.pair2} / ${t.pair3}`} size="small" variant="outlined" /></TableCell>
                   <TableCell>
@@ -296,11 +309,11 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
                       <Chip label={t.cycle} size="small" />
                     </Tooltip>
                   </TableCell>
-                  <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{t.minProfitPercent.toFixed(5)}</TableCell>
-                  <TableCell align="right">${t.minProfitUsd.toFixed(2)}</TableCell>
+                  <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{n(t.minProfitPercent, 5)}</TableCell>
+                  <TableCell align="right">${n(t.minProfitUsd, 2)}</TableCell>
                   <TableCell align="right" sx={{ display: { xs: 'none', sm: 'table-cell' } }}>{t.hits}</TableCell>
-                  <TableCell align="right" sx={{ color: t.totalProfitUsd >= 0 ? 'success.main' : 'error.main' }}>
-                    ${t.totalProfitUsd.toFixed(2)}
+                  <TableCell align="right" sx={{ color: Number(t.totalProfitUsd) >= 0 ? 'success.main' : 'error.main' }}>
+                    ${n(t.totalProfitUsd, 2)}
                   </TableCell>
                   <TableCell align="center">
                     <Switch size="small" checked={t.status === 'ACTIVE'} onChange={() => void handleToggleStatus(t)} />
@@ -316,7 +329,7 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
               ))}
               {triangles.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3, color: 'text.secondary' }}>No triangles configured</TableCell>
+                  <TableCell colSpan={10} align="center" sx={{ py: 3, color: 'text.secondary' }}>No triangles configured</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -340,9 +353,9 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
               onChange={(e) => setExForm(f => ({ ...f, apiKey: e.target.value || null }))} />
             <TextField label="API Secret" size="small" fullWidth type="password" value={exForm.apiSecret ?? ''}
               onChange={(e) => setExForm(f => ({ ...f, apiSecret: e.target.value || null }))} />
-            <TextField label="API Passphrase (Coinbase / KuCoin)" size="small" fullWidth value={exForm.apiPassphrase ?? ''}
+            <TextField label="API Passphrase (Coinbase / KuCoin) / Client ID (IB)" size="small" fullWidth value={exForm.apiPassphrase ?? ''}
               onChange={(e) => setExForm(f => ({ ...f, apiPassphrase: e.target.value || null }))} />
-            <TextField label="WebSocket URL (leave blank for default)" size="small" fullWidth value={exForm.wsUrl ?? ''}
+            <TextField label="WebSocket URL (leave blank for default; IB: host:port, e.g. localhost:4002)" size="small" fullWidth value={exForm.wsUrl ?? ''}
               onChange={(e) => setExForm(f => ({ ...f, wsUrl: e.target.value || null }))} />
             <TextField label="Order Size USD" size="small" fullWidth type="number" value={exForm.orderSizeUsd}
               onChange={(e) => setExForm(f => ({ ...f, orderSizeUsd: Number(e.target.value) }))} />
@@ -375,9 +388,32 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
                 {KNOWN_EXCHANGES.map(ex => <MenuItem key={ex} value={ex}>{ex}</MenuItem>)}
               </Select>
             </FormControl>
-            {triTextField('pair1', 'Pair 1 (e.g. EURUSD)')}
-            {triTextField('pair2', 'Pair 2 (e.g. USDJPY)')}
-            {triTextField('pair3', 'Pair 3 (e.g. EURJPY)')}
+            {(['pair1', 'pair2', 'pair3'] as const).map((pairKey, i) => {
+              const staleKey = (['staleMs1', 'staleMs2', 'staleMs3'] as const)[i];
+              const pairEmpty = triSaveAttempted && !triForm[pairKey].trim();
+              return (
+                <Box key={pairKey} sx={{ display: 'flex', gap: 1 }}>
+                  <TextField
+                    label={`Pair ${i + 1} (e.g. EURUSD)`}
+                    size="small"
+                    sx={{ flex: 1 }}
+                    value={triForm[pairKey]}
+                    onChange={(e) => setTriForm(f => ({ ...f, [pairKey]: e.target.value }))}
+                    error={pairEmpty}
+                    helperText={pairEmpty ? 'Required' : undefined}
+                  />
+                  <TextField
+                    label="Stale (ms)"
+                    size="small"
+                    type="number"
+                    sx={{ width: 120 }}
+                    value={triForm[staleKey]}
+                    onChange={(e) => setTriForm(f => ({ ...f, [staleKey]: Number(e.target.value) }))}
+                    inputProps={{ min: 1000, step: 1000 }}
+                  />
+                </Box>
+              );
+            })}
             {triTextField('minProfitPercent', 'Min Profit % (e.g. 0.00025)', 'number')}
             {triTextField('minProfitUsd', 'Min Profit USD', 'number')}
             <Box>
@@ -396,7 +432,13 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setTriDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={() => void handleSaveTri()}>Save</Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleSaveTri()}
+            disabled={triSaveAttempted && !triFormValid()}
+          >
+            Save
+          </Button>
         </DialogActions>
       </Dialog>
 
@@ -440,7 +482,7 @@ export default function Triangles({ prices, exchangeRunning }: Props) {
                         sx={{ width: { xs: '100%', sm: 110 } }} />
                     </TableCell>
                     <TableCell>
-                      <TextField type="number" size="small" value={l.quantity.toFixed(4)}
+                      <TextField type="number" size="small" value={n(l.quantity, 4)}
                         onChange={(e) => updateLeg(l.legIndex, 'quantity', Number(e.target.value))}
                         sx={{ width: { xs: '100%', sm: 110 } }} />
                     </TableCell>

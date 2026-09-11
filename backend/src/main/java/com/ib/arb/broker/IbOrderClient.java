@@ -40,6 +40,19 @@ public class IbOrderClient extends AbstractOrderClient {
         return isSimulation() || connection.isConnected();
     }
 
+    @Override public int[] getPrecision(String pair) { return new int[]{5, 0}; }
+
+    @Override
+    public CancelResult cancelOrder(String txid, String pair) {
+        if (!connection.isConnected()) return new CancelResult(false, "Not connected to IB Gateway");
+        try {
+            connection.cancelOrder(Integer.parseInt(txid));
+            return new CancelResult(true, null);
+        } catch (Exception e) {
+            return new CancelResult(false, e.getMessage());
+        }
+    }
+
     @Override
     public List<LegResult> placeOrderLegs(List<OrderLeg> legs) {
         openOrders.incrementAndGet();
@@ -52,18 +65,19 @@ public class IbOrderClient extends AbstractOrderClient {
                         var orderId = future.get(10, TimeUnit.SECONDS);
                         boolean filled = orderId != null;
                         return new LegResult(leg.legIndex(), leg.pair(), leg.direction(),
-                                leg.price(), leg.quantity(), filled, orderId);
+                                leg.price(), leg.quantity(), filled, orderId,
+                                filled ? null : "Order rejected by IB Gateway");
                     } catch (Exception e) {
                         log.error("[IB] Order leg {} failed: {}", leg.legIndex(), e.getMessage());
                         return new LegResult(leg.legIndex(), leg.pair(), leg.direction(),
-                                leg.price(), leg.quantity(), false, null);
+                                leg.price(), leg.quantity(), false, null, "Order rejected by IB Gateway");
                     }
                 }))
                 .toList();
 
             return futures.stream()
                 .map(f -> { try { return f.join(); } catch (Exception e) {
-                    return new LegResult(0, "", "", 0, 0, false, null); } })
+                    return new LegResult(0, "", "", 0, 0, false, null, "Order rejected by IB Gateway"); } })
                 .sorted(Comparator.comparingInt(LegResult::legIndex))
                 .toList();
         } finally {

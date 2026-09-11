@@ -23,6 +23,7 @@ public class TradeLeg {
     private double volume;
     private String status;
     private String orderId;
+    private Double quoteRate;
 
     public Long getId() { return id; }
     public int getLegIndex() { return legIndex; }
@@ -32,6 +33,7 @@ public class TradeLeg {
     public double getVolume() { return volume; }
     public String getStatus() { return status; }
     public String getOrderId() { return orderId; }
+    public Double getQuoteRate() { return quoteRate; }
     @JsonIgnore public Trade getTrade() { return trade; }
 
     public TradeLeg setTrade(Trade trade)         { this.trade = trade;         return this; }
@@ -42,4 +44,5 @@ public class TradeLeg {
     public TradeLeg setVolume(double volume)       { this.volume = volume;       return this; }
     public TradeLeg setStatus(String status)       { this.status = status;       return this; }
     public TradeLeg setOrderId(String orderId)     { this.orderId = orderId;     return this; }
+    public TradeLeg setQuoteRate(Double quoteRate) { this.quoteRate = quoteRate; return this; }
 }

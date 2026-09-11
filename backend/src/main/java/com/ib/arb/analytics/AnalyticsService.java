@@ -35,7 +35,7 @@ public class AnalyticsService {
             .toLocalDate().atStartOfDay(CHICAGO)
             .withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
         var sum = trades.sumPnlSince(startOfDay);
-        return sum != null ? sum : 0.0;
+        return (sum != null && Double.isFinite(sum)) ? sum : 0.0;
     }
 
     /**
@@ -85,7 +85,7 @@ public class AnalyticsService {
             .toLocalDate().withDayOfMonth(1).atStartOfDay(CHICAGO)
             .withZoneSameInstant(ZoneId.of("UTC")).toLocalDateTime();
         var sum = trades.sumPnlSince(startOfMonth);
-        return sum != null ? sum : 0.0;
+        return (sum != null && Double.isFinite(sum)) ? sum : 0.0;
     }
 
     /**

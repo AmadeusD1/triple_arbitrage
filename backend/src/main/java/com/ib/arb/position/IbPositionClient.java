@@ -48,7 +48,7 @@ public class IbPositionClient implements PositionClient {
         if (!connection.isConnected()) return List.of();
         var orders = new ArrayList<OpenOrder>();
         connection.openOrderMap.values().forEach(o -> orders.add(new OpenOrder(
-            String.valueOf(o.orderId()), o.pair(), o.action().toLowerCase(),
+            "IB", String.valueOf(o.orderId()), o.pair(), o.action().toLowerCase(),
             o.orderType().toLowerCase(), o.price(), o.qty(), 0,
             System.currentTimeMillis() / 1000.0, o.status().toLowerCase())));
         return orders;

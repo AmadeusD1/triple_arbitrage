@@ -14,6 +14,7 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -33,6 +34,15 @@ import java.util.concurrent.TimeUnit;
 public class CurrencyRateFeed {
 
     private static final Logger log = LoggerFactory.getLogger(CurrencyRateFeed.class);
+
+    // Currencies handled by CurrencyLayer (the fiat API); everything else is treated as crypto.
+    private static final Set<String> FIAT_CURRENCIES = Set.of(
+        "USD", "EUR", "GBP", "JPY", "TRY", "KRW", "AUD", "NZD", "CAD", "CHF", "AED"
+    );
+
+    public static boolean isFiat(String currency) {
+        return FIAT_CURRENCIES.contains(currency.toUpperCase());
+    }
 
     @Value("${currency.feed-url:ws://localhost:7070/api/ws/global}")
     private String feedUrl;
@@ -73,8 +83,25 @@ public class CurrencyRateFeed {
         return 0.0;
     }
 
+    /**
+     * Returns the aggregator-sourced USD price for a cryptocurrency, bypassing CurrencyLayer.
+     * Returns 0.0 if the aggregator has not yet published a rate for this currency.
+     * Stablecoins (USDT/USDC/BUSD) default to 1.0 only when no market rate is available.
+     */
+    public double getCryptoRate(String currency) {
+        if ("USD".equals(currency)) return 1.0;
+        var direct = rates.get(currency + "/USD");
+        if (direct != null && direct > 0) return direct;
+        var inverse = rates.get("USD/" + currency);
+        if (inverse != null && inverse > 0) return 1.0 / inverse;
+        if ("USDT".equals(currency) || "USDC".equals(currency) || "BUSD".equals(currency)) return 1.0;
+        return 0.0;
+    }
+
     public Map<String, Double> getAllRates() {
-        return Collections.unmodifiableMap(rates);
+        var merged = new java.util.HashMap<>(currencyLayerService.getAllRates());
+        merged.putAll(rates);
+        return Collections.unmodifiableMap(merged);
     }
 
     public boolean isConnected() {
@@ -139,10 +166,12 @@ public class CurrencyRateFeed {
         }
     }
 
+    private record PriceEntry(double price, boolean calculated) {}
+
     private void handleMessage(String json) {
         try {
-            var update = mapper.readValue(json, new TypeReference<Map<String, Double>>() {});
-            rates.putAll(update);
+            var update = mapper.readValue(json, new TypeReference<Map<String, PriceEntry>>() {});
+            update.forEach((pair, entry) -> rates.put(pair, entry.price()));
         } catch (Exception e) {
             log.debug("[FX] Failed to parse message: {}", e.getMessage());
         }

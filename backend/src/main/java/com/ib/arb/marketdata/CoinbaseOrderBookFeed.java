@@ -33,6 +33,7 @@ public class CoinbaseOrderBookFeed implements OrderBookFeed {
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ScheduledExecutorService reconnectScheduler = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, OrderBook> snapshots = new ConcurrentHashMap<>();
+    private volatile Runnable onUpdate = () -> {};
     // best bids/asks accumulated from l2update events
     private final Map<String, double[]> bestBid = new ConcurrentHashMap<>();
     private final Map<String, double[]> bestAsk = new ConcurrentHashMap<>();
@@ -47,6 +48,7 @@ public class CoinbaseOrderBookFeed implements OrderBookFeed {
     @Override public Exchange getExchange() { return Exchange.COINBASE; }
     @Override public OrderBook getSnapshot(String pair) { return snapshots.get(pair.toUpperCase()); }
     @Override public boolean isConnected() { return connected; }
+    @Override public void setOnUpdate(Runnable onUpdate) { this.onUpdate = onUpdate; }
 
     @Override
     public void subscribe(List<String> pairs) {
@@ -137,6 +139,7 @@ public class CoinbaseOrderBookFeed implements OrderBookFeed {
         var ask = bestAsk.get(pair);
         if (bid != null && ask != null && bid[0] > 0 && ask[0] > 0) {
             snapshots.put(pair, new OrderBook(pair, bid[0], bid[1], ask[0], ask[1]));
+            onUpdate.run();
         }
     }
 

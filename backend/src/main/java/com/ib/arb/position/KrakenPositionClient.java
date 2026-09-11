@@ -37,28 +37,39 @@ public class KrakenPositionClient implements PositionClient {
 
     @Override
     public Map<String, Double> fetchBalances() {
-        try {
-            var nonce = KrakenAuth.nextNonce();
-            var body  = "nonce=" + nonce;
-            var root  = mapper.readTree(send("/0/private/Balance", nonce, body));
+        // Retried because the startup call can land in a brief window where outbound
+        // HTTPS intermittently fails while the JVM's network stack settles.
+        Exception lastError = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                var nonce = KrakenAuth.nextNonce();
+                var body  = "nonce=" + nonce;
+                var root  = mapper.readTree(send("/0/private/Balance", nonce, body));
 
-            var errors = root.path("error");
-            if (errors.isArray() && !errors.isEmpty()) {
-                log.error("Kraken Balance error: {}", errors);
-                return Map.of();
+                var errors = root.path("error");
+                if (errors.isArray() && !errors.isEmpty()) {
+                    log.error("Kraken Balance error: {}", errors);
+                    return Map.of();
+                }
+                var result = root.path("result");
+                if (result.isMissingNode()) {
+                    log.error("Kraken Balance: missing result field");
+                    return Map.of();
+                }
+                var balances = new ConcurrentHashMap<String, Double>();
+                result.properties().forEach(e -> balances.put(e.getKey(), e.getValue().asDouble()));
+                return balances;
+            } catch (Exception e) {
+                lastError = e;
+                if (attempt < 3) {
+                    try { Thread.sleep(1000); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); return Map.of(); }
+                }
             }
-            var result = root.path("result");
-            if (result.isMissingNode()) {
-                log.error("Kraken Balance: missing result field");
-                return Map.of();
-            }
-            var balances = new ConcurrentHashMap<String, Double>();
-            result.properties().forEach(e -> balances.put(e.getKey(), e.getValue().asDouble()));
-            return balances;
-        } catch (Exception e) {
-            log.error("Failed to fetch Kraken balances: {}", e.getMessage());
-            return Map.of();
         }
+        log.error("Failed to fetch Kraken balances after 3 attempts: {}: {}",
+            lastError.getClass().getSimpleName(), lastError.getMessage());
+        return Map.of();
     }
 
     @Override
@@ -78,6 +89,7 @@ public class KrakenPositionClient implements PositionClient {
                 var o    = entry.getValue();
                 var desc = o.path("descr");
                 orders.add(new OpenOrder(
+                    "KRAKEN",
                     txid,
                     desc.path("pair").asText(),
                     desc.path("type").asText(),

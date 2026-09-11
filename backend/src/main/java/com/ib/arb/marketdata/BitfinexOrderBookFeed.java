@@ -36,6 +36,7 @@ public class BitfinexOrderBookFeed implements OrderBookFeed {
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ScheduledExecutorService reconnectScheduler = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, OrderBook> snapshots    = new ConcurrentHashMap<>();
+    private volatile Runnable onUpdate = () -> {};
     private final Map<Integer, String>   chanToPair   = new ConcurrentHashMap<>(); // chanId → internal pair
     private final Map<String, double[]>  bestBid      = new ConcurrentHashMap<>();
     private final Map<String, double[]>  bestAsk      = new ConcurrentHashMap<>();
@@ -52,6 +53,7 @@ public class BitfinexOrderBookFeed implements OrderBookFeed {
     @Override public Exchange getExchange() { return Exchange.BITFINEX; }
     @Override public OrderBook getSnapshot(String pair) { return snapshots.get(pair.toUpperCase()); }
     @Override public boolean isConnected() { return connected; }
+    @Override public void setOnUpdate(Runnable onUpdate) { this.onUpdate = onUpdate; }
 
     @Override
     public void subscribe(List<String> pairs) {
@@ -65,8 +67,69 @@ public class BitfinexOrderBookFeed implements OrderBookFeed {
             .orElse(DEFAULT_WS);
     }
 
-    /** Internal pair BTCUSD → tBTCUSD for Bitfinex */
-    private static String toBfxSymbol(String pair) { return "t" + pair.toUpperCase(); }
+    // Longest-first so "USDT" matches before "USD", "USDC" before "USD", etc.
+    // Needed to correctly split a concatenated internal pair like "BTCUSDT" into
+    // base/quote (a plain first-3-chars split mangles 4+ letter currencies).
+    private static final List<String> QUOTE_SUFFIXES = List.of(
+        "USDT", "USDC", "BUSD", "EUR", "GBP", "JPY", "TRY", "USD", "BTC", "ETH"
+    );
+
+    private static String[] splitPair(String pair) {
+        var norm = pair.toUpperCase();
+        for (var q : QUOTE_SUFFIXES) {
+            if (norm.endsWith(q) && norm.length() > q.length())
+                return new String[]{ norm.substring(0, norm.length() - q.length()), q };
+        }
+        return new String[]{ norm.substring(0, 3), norm.substring(3) };
+    }
+
+    // Bitfinex uses its own 3-letter codes for USDT ("UST") and USDC ("UDC") so that
+    // common pairs stay in the compact fixed-width BASEQUOTE form (e.g. "USTUSD",
+    // "UDCUSD", "BTCUST"). Any other currency longer than 3 letters (DOGE, AAVE, ...)
+    // instead uses a colon-separated symbol (e.g. "DOGE:USD", "AAVE:USD").
+    private static String toBfxCode(String ccy) {
+        return switch (ccy) {
+            case "USDT" -> "UST";
+            case "USDC" -> "UDC";
+            default -> ccy;
+        };
+    }
+
+    private static String fromBfxCode(String code) {
+        return switch (code) {
+            case "UST" -> "USDT";
+            case "UDC" -> "USDC";
+            default -> code;
+        };
+    }
+
+    /**
+     * Internal pair BTCUSD → tBTCUSD, BTCUSDT → tBTCUST, DOGEUSD → tDOGE:USD for
+     * Bitfinex (colon needed once either code exceeds 3 letters, to keep the
+     * symbol unambiguous).
+     */
+    private static String toBfxSymbol(String pair) {
+        var parts = splitPair(pair);
+        var base = toBfxCode(parts[0]);
+        var quote = toBfxCode(parts[1]);
+        var separator = (base.length() == 3 && quote.length() == 3) ? "" : ":";
+        return "t" + base + separator + quote;
+    }
+
+    /** Reverses {@link #toBfxSymbol}: tBTCUST -> BTCUSDT, tDOGE:USD -> DOGEUSD. */
+    private static String fromBfxSymbol(String symbol) {
+        var body = symbol.startsWith("t") ? symbol.substring(1) : symbol;
+        String base, quote;
+        if (body.contains(":")) {
+            var parts = body.split(":", 2);
+            base = parts[0];
+            quote = parts[1];
+        } else {
+            base = body.substring(0, 3);
+            quote = body.substring(3);
+        }
+        return fromBfxCode(base) + fromBfxCode(quote);
+    }
 
     private void connect() {
         chanToPair.clear();
@@ -96,9 +159,9 @@ public class BitfinexOrderBookFeed implements OrderBookFeed {
                 var event = root.path("event").asText();
                 if ("subscribed".equals(event) && "book".equals(root.path("channel").asText())) {
                     var chanId = root.path("chanId").asInt();
-                    var sym    = root.path("symbol").asText(); // tBTCUSD
-                    var pair   = sym.startsWith("t") ? sym.substring(1) : sym;
-                    chanToPair.put(chanId, pair.toUpperCase());
+                    var sym    = root.path("symbol").asText(); // tBTCUST, tDOGE:USD, ...
+                    var pair   = fromBfxSymbol(sym);
+                    chanToPair.put(chanId, pair);
                 }
                 return;
             }
@@ -155,6 +218,7 @@ public class BitfinexOrderBookFeed implements OrderBookFeed {
         var ask = bestAsk.get(pair);
         if (bid != null && ask != null && bid[0] > 0 && ask[0] > 0) {
             snapshots.put(pair, new OrderBook(pair, bid[0], bid[1], ask[0], ask[1]));
+            onUpdate.run();
         }
     }
 

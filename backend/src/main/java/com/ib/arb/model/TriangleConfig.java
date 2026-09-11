@@ -10,6 +10,9 @@ public class TriangleConfig {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "display_order")
+    private Integer displayOrder;
+
     private String exchange;
     private String pair1;
     private String pair2;
@@ -21,7 +24,19 @@ public class TriangleConfig {
     private double totalProfitUsd;
     private String cycle;
 
+    @Column(name = "stale_ms_1")
+    private int staleMs1 = 10_000;
+
+    @Column(name = "stale_ms_2")
+    private int staleMs2 = 10_000;
+
+    @Column(name = "stale_ms_3")
+    private int staleMs3 = 10_000;
+
     public Long getId() { return id; }
+
+    public Integer getDisplayOrder() { return displayOrder; }
+    public void setDisplayOrder(Integer displayOrder) { this.displayOrder = displayOrder; }
 
     public String getExchange() { return exchange; }
     public void setExchange(String exchange) { this.exchange = exchange; }
@@ -52,4 +67,13 @@ public class TriangleConfig {
 
     public String getCycle() { return cycle; }
     public void setCycle(String cycle) { this.cycle = cycle; }
+
+    public int getStaleMs1() { return staleMs1; }
+    public void setStaleMs1(int staleMs1) { this.staleMs1 = staleMs1; }
+
+    public int getStaleMs2() { return staleMs2; }
+    public void setStaleMs2(int staleMs2) { this.staleMs2 = staleMs2; }
+
+    public int getStaleMs3() { return staleMs3; }
+    public void setStaleMs3(int staleMs3) { this.staleMs3 = staleMs3; }
 }

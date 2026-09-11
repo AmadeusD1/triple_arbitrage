@@ -12,6 +12,7 @@ import com.ib.arb.model.Trade;
 import com.ib.arb.model.TradeLeg;
 import com.ib.arb.model.TriangleConfig;
 import com.ib.arb.position.PositionService;
+import com.ib.arb.repository.ExchangeConfigRepository;
 import com.ib.arb.repository.MissedOpportunityRepository;
 import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
@@ -34,9 +35,11 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -59,6 +62,7 @@ public class AutoTrader {
     private final TriangleConfigRepository triangleConfigRepo;
     private final CurrencyRateFeed currencyRateFeed;
     private final MissedOpportunityRepository missedOpportunityRepo;
+    private final ExchangeConfigRepository configRepo;
 
     @Value("${arb.max-open-orders}")
     private int maxOpenOrders;
@@ -74,11 +78,16 @@ public class AutoTrader {
     private final Map<Exchange, AtomicLong>   missedMap            = new ConcurrentHashMap<>();
     private final Map<Exchange, AtomicLong>   totalEdgeBitsMap     = new ConcurrentHashMap<>();
 
+    /** Per-exchange critical alerts (e.g. precision-error rejections) — set when live order
+     *  placement is halted, surfaced to the Dashboard, cleared on restart. */
+    private final Map<Exchange, String> exchangeAlerts = new ConcurrentHashMap<>();
+
     public AutoTrader(ArbitrageEngine arbitrageEngine, PositionService positions,
                       RiskService risk, List<OrderClient> clients,
                       TradeRepository tradeRepo, AlertService alerts,
                       TriangleConfigRepository triangleConfigRepo, CurrencyRateFeed currencyRateFeed,
-                      MissedOpportunityRepository missedOpportunityRepo) {
+                      MissedOpportunityRepository missedOpportunityRepo,
+                      ExchangeConfigRepository configRepo) {
         this.arbitrageEngine  = arbitrageEngine;
         this.positions        = positions;
         this.risk             = risk;
@@ -89,6 +98,7 @@ public class AutoTrader {
         this.triangleConfigRepo = triangleConfigRepo;
         this.currencyRateFeed = currencyRateFeed;
         this.missedOpportunityRepo = missedOpportunityRepo;
+        this.configRepo       = configRepo;
     }
 
     // ── Automated path ────────────────────────────────────────────────────────
@@ -125,6 +135,7 @@ public class AutoTrader {
         maxVolume = Math.min(effectiveOrderSize(s.exchange()), maxVolume);
         var legs = computeLegs(s, maxVolume);
         var expectedPnl = computePnlFromLegs(legs, maxVolume);
+        var quoteRates = captureQuoteRates(legs);
 
         // Phase 1: validate from cache — avoid API calls for rejected opportunities
         var v = validatePreExecution(s.exchange(), s.config(), s.cycle().name(), maxVolume, s.profit(), expectedPnl);
@@ -148,19 +159,18 @@ public class AutoTrader {
         var start = System.currentTimeMillis();
         List<LegResult> legResults;
         if (broker.isSimulation()) {
-            legResults = legs.stream()
-                .map(l -> new LegResult(l.legIndex(), l.pair(), l.direction(), l.price(), l.quantity(), true, null))
-                .toList();
+            legResults = simulatedLegResults(legs, broker);
             log.info("[SIM] {} Cycle {} | {} | profit={}", s.exchange(), s.cycle(),
                 legResults.stream().map(l -> l.direction() + " " + l.pair())
                     .reduce((a, b) -> a + ", " + b).orElse(""),
                 String.format("%.5f", s.profit()));
         } else {
             legResults = broker.placeOrderLegs(legs);
+            reportIfHaltingError(s.exchange(), broker);
         }
         var latencyMs = System.currentTimeMillis() - start;
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
-        finalizeExecution(s, broker, legResults, latencyMs, filled ? expectedPnl : 0, filled, "ARB", true, maxVolume, expectedPnl);
+        finalizeExecution(s, broker, legResults, latencyMs, filled ? expectedPnl : 0, filled, "ARB", true, maxVolume, expectedPnl, quoteRates);
     }
 
     // ── Manual path ───────────────────────────────────────────────────────────
@@ -184,13 +194,18 @@ public class AutoTrader {
         };
 
         var manualExpectedPnl = computePnlFromLegs(legs, notional);
+        var quoteRates = captureQuoteRates(legs);
         var v = validatePreExecution(exchange, config, cycle, notional, edge, manualExpectedPnl);
         if (!v.allowed()) return new ManualTradeResult(-1, v.rejectionStatus(), 0.0);
 
         var start = System.currentTimeMillis();
-        List<LegResult> legResults = broker.isSimulation()
-            ? legs.stream().map(l -> new LegResult(l.legIndex(), l.pair(), l.direction(), l.price(), l.quantity(), true, null)).toList()
-            : broker.placeOrderLegs(legs);
+        List<LegResult> legResults;
+        if (broker.isSimulation()) {
+            legResults = simulatedLegResults(legs, broker);
+        } else {
+            legResults = broker.placeOrderLegs(legs);
+            reportIfHaltingError(exchange, broker);
+        }
         var latencyMs = System.currentTimeMillis() - start;
 
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
@@ -198,7 +213,7 @@ public class AutoTrader {
         var b2 = new OrderBook(config.getPair2(), legs.get(1).price(), legs.get(1).quantity(), legs.get(1).price(), legs.get(1).quantity());
         var b3 = new OrderBook(config.getPair3(), legs.get(2).price(), legs.get(2).quantity(), legs.get(2).price(), legs.get(2).quantity());
         var signal = new Signal(exchange, config, cycleEnum, edge, b1, b2, b3);
-        var trade  = finalizeExecution(signal, broker, legResults, latencyMs, filled ? edge * notional : 0, filled, "MANUAL", false, notional, manualExpectedPnl);
+        var trade  = finalizeExecution(signal, broker, legResults, latencyMs, filled ? edge * notional : 0, filled, "MANUAL", false, notional, manualExpectedPnl, quoteRates);
         return new ManualTradeResult(trade.getId(), trade.getStatus(), filled ? edge * notional : 0);
     }
 
@@ -226,11 +241,12 @@ public class AutoTrader {
 
     private Trade finalizeExecution(Signal signal, OrderClient broker, List<LegResult> legResults,
             long latencyMs, double estimatedPnl, boolean filled,
-            String logPrefix, boolean sendAlert, double orderSize, double expectedPnl) {
+            String logPrefix, boolean sendAlert, double orderSize, double expectedPnl,
+            List<Double> quoteRates) {
         lastTradeTime(signal.exchange()).set(System.currentTimeMillis());
         executing(signal.exchange()).set(false);
 
-        var trade = buildTrade(signal, broker, legResults, latencyMs, estimatedPnl, filled, orderSize, expectedPnl);
+        var trade = buildTrade(signal, broker, legResults, latencyMs, estimatedPnl, filled, orderSize, expectedPnl, quoteRates);
         tradeRepo.save(trade);
         // Simulation trades need no position refresh; real trades wait 2s for order settlement
         if (!broker.isSimulation()) positions.refreshBalancesDelayed(signal.exchange(), 2000);
@@ -238,6 +254,8 @@ public class AutoTrader {
         if (filled) {
             counter(executedMap, signal.exchange()).incrementAndGet();
             triangleConfigRepo.incrementStats(signal.config().getId(), estimatedPnl);
+            arbitrageEngine.invalidateSnapshots(signal.exchange(),
+                signal.config().getPair1(), signal.config().getPair2(), signal.config().getPair3());
             if (sendAlert) alerts.tradeFilled(signal, estimatedPnl);
             log.info("[{}] {} trade filled — tradeId={} pnl={} latencyMs={}",
                 logPrefix, signal.exchange(), trade.getId(), String.format("%.2f", estimatedPnl), latencyMs);
@@ -256,8 +274,9 @@ public class AutoTrader {
         for (int i = 0; i < 3; i++) {
             var pair  = pairs[i];
             var isBuy = BUY.equals(dirs[i]);
+            var parts = splitPair(pair);
+            var ccy   = isBuy ? parts[1] : parts[0];
             var norm  = pair.replace("/", "");
-            var ccy   = isBuy ? norm.substring(3) : norm.substring(0, 3);
             var price = snapshots.stream()
                 .filter(p -> exchange.name().equals(p.exchange()) && norm.equalsIgnoreCase(p.pair().replace("/", "")))
                 .findFirst()
@@ -298,15 +317,16 @@ public class AutoTrader {
             case SBS -> new double[]{ s.b1().bid(), s.b2().ask(), s.b3().bid() };
         };
         return IntStream.range(0, 3)
-            .mapToObj(i -> new OrderLeg(i + 1, pairs[i], dirs[i], prices[i], orderSize / baseRate(pairs[i])))
+            .mapToObj(i -> new OrderLeg(i + 1, pairs[i], dirs[i], prices[i], orderSize / baseRate(pairs[i]), "LIMIT"))
             .toList();
     }
 
     public double computePnlFromLegs(List<OrderLeg> legs, double initialAmount) {
         var net = new HashMap<String, Double>();
         for (var leg : legs) {
-            var base  = leg.pair().replace("/", "").substring(0, 3);
-            var quote = leg.pair().replace("/", "").substring(3);
+            var parts = splitPair(leg.pair());
+            var base  = parts[0];
+            var quote = parts[1];
             if (BUY.equals(leg.direction())) {
                 net.merge(base,   leg.quantity(),               Double::sum);
                 net.merge(quote, -leg.quantity() * leg.price(), Double::sum);
@@ -322,7 +342,7 @@ public class AutoTrader {
 
     private Trade buildTrade(Signal signal, OrderClient broker, List<LegResult> legResults,
             long latencyMs, double estimatedPnl, boolean filled,
-            double orderSize, double expectedPnl) {
+            double orderSize, double expectedPnl, List<Double> quoteRates) {
         var trade = new Trade()
             .setTime(LocalDateTime.now(ZoneOffset.UTC))
             .setDirection(signal.cycle().name())
@@ -332,16 +352,26 @@ public class AutoTrader {
             .setLatencyMs(latencyMs)
             .setOrderSize(orderSize)
             .setExpectedPnl(expectedPnl)
-            .setExchange(signal.exchange().name());
+            .setExchange(signal.exchange().name())
+            .setProfitPercent(orderSize > 0 ? estimatedPnl / orderSize * 100.0 : 0.0)
+            .setTriangleDisplayOrder(signal.config().getDisplayOrder())
+            .setPair1(signal.config().getPair1())
+            .setPair2(signal.config().getPair2())
+            .setPair3(signal.config().getPair3());
 
-        legResults.forEach(lr -> trade.addLeg(new TradeLeg()
-            .setLegIndex(lr.legIndex())
-            .setPair(lr.pair())
-            .setDirection(lr.direction())
-            .setPrice(lr.price())
-            .setVolume(lr.volume())
-            .setStatus(broker.isSimulation() ? SIMULATED : lr.filled() ? FILLED : FAILED)
-            .setOrderId(lr.orderId())));
+        for (int i = 0; i < legResults.size(); i++) {
+            var lr = legResults.get(i);
+            var rate = (quoteRates != null && i < quoteRates.size()) ? quoteRates.get(i) : null;
+            trade.addLeg(new TradeLeg()
+                .setLegIndex(lr.legIndex())
+                .setPair(lr.pair())
+                .setDirection(lr.direction())
+                .setPrice(lr.price())
+                .setVolume(lr.volume())
+                .setStatus(broker.isSimulation() ? SIMULATED : lr.filled() ? FILLED : FAILED)
+                .setOrderId(lr.orderId())
+                .setQuoteRate(rate));
+        }
         return trade;
     }
 
@@ -381,6 +411,25 @@ public class AutoTrader {
         return executingMap.values().stream().anyMatch(AtomicBoolean::get);
     }
 
+    // ── Per-exchange alerts (precision-error halts) ──────────────────────────
+
+    /** If the broker reported a critical error (e.g. precision rejection), record it as an
+     *  exchange-level alert so {@code ExchangeManager} halts scanning and the Dashboard shows it. */
+    private void reportIfHaltingError(Exchange exchange, OrderClient broker) {
+        broker.consumeError().ifPresent(err -> {
+            exchangeAlerts.put(exchange, err);
+            log.error("[ARB] {} — halting trading: {}", exchange, err);
+        });
+    }
+
+    public Optional<String> getExchangeAlert(Exchange exchange) {
+        return Optional.ofNullable(exchangeAlerts.get(exchange));
+    }
+
+    public void clearExchangeAlert(Exchange exchange) {
+        exchangeAlerts.remove(exchange);
+    }
+
     // ── Per-exchange state accessors ─────────────────────────────────────────
 
     private AtomicLong lastTradeTime(Exchange e) {
@@ -396,21 +445,95 @@ public class AutoTrader {
         return totalEdgeBitsMap.computeIfAbsent(e, x -> new AtomicLong(0));
     }
     private double effectiveOrderSize(Exchange e) {
-        return orderClients.containsKey(e)
-            ? 100_000 // default; overridden by ExchangeConfig via RiskService gate
-            : 100_000;
+        return configRepo.findByExchange(e.name())
+            .map(cfg -> {
+                double size = Math.min(cfg.getOrderSizeUsd(), cfg.getPositionLimitUsd());
+                if (cfg.getOrderSizeUsd() > cfg.getPositionLimitUsd())
+                    log.debug("[ARB] {} order size capped at position limit ({} → {})",
+                        e, cfg.getOrderSizeUsd(), size);
+                return size;
+            })
+            .orElse(100_000.0);
     }
-    private double baseRate(String pair)  { return resolveUsdRate(pair.replace("/", "").substring(0, 3)); }
-    private double quoteRate(String pair) { return resolveUsdRate(pair.replace("/", "").substring(3)); }
+    private double baseRate(String pair)  { return resolveUsdRate(splitPair(pair)[0]); }
+    private double quoteRate(String pair) { return resolveUsdRate(splitPair(pair)[1]); }
+
+    // Longest-first so "USDT" matches before "USD", "USDC" before "USD", etc.
+    private static final List<String> QUOTE_SUFFIXES = List.of(
+        "USDT", "USDC", "BUSD", "EUR", "GBP", "JPY", "TRY", "USD", "BTC", "ETH"
+    );
+
+    private static String[] splitPair(String pair) {
+        var norm = pair.replace("/", "").toUpperCase();
+        for (var q : QUOTE_SUFFIXES) {
+            if (norm.endsWith(q) && norm.length() > q.length())
+                return new String[]{ norm.substring(0, norm.length() - q.length()), q };
+        }
+        return new String[]{ norm.substring(0, 3), norm.substring(3) };
+    }
     private double min3(double a, double b, double c) { return DoubleStream.of(a, b, c).min().orElse(0); }
 
+    /**
+     * Builds simulated {@link LegResult}s using each pair's real exchange precision (via
+     * {@link OrderClient#getPrecision}), so simulated trades record the same rounded
+     * price/quantity a real order would have sent — not the raw unrounded computed values.
+     * Note: for Bitfinex specifically this is an approximation, since its real precision rule
+     * is significant-figure based rather than a fixed per-pair decimal count.
+     */
+    private List<LegResult> simulatedLegResults(List<OrderLeg> legs, OrderClient broker) {
+        return legs.stream()
+            .map(l -> {
+                var prec = broker.getPrecision(l.pair());
+                var price = round(l.price(), prec[0]);
+                var qty   = round(l.quantity(), prec[1]);
+                return new LegResult(l.legIndex(), l.pair(), l.direction(), price, qty, true, null, null);
+            })
+            .toList();
+    }
+
+    private static double round(double v, int decimals) {
+        return java.math.BigDecimal.valueOf(v).setScale(decimals, java.math.RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private List<Double> captureQuoteRates(List<OrderLeg> legs) {
+        var rates = new ArrayList<Double>(legs.size());
+        for (var leg : legs) {
+            var parts    = splitPair(leg.pair());
+            var baseUsd  = resolveUsdRate(parts[0]);
+            var quoteUsd = resolveUsdRate(parts[1]);
+            rates.add(baseUsd > 0 && quoteUsd > 0 ? baseUsd / quoteUsd : null);
+        }
+        return rates;
+    }
+
     private double resolveUsdRate(String currency) {
-        var rate = currencyRateFeed.getRate(currency);
+        // Step 1: fiat → CurrencyLayer; crypto → Crypto Aggregator feed
+        var rate = CurrencyRateFeed.isFiat(currency)
+            ? currencyRateFeed.getRate(currency)
+            : currencyRateFeed.getCryptoRate(currency);
         if (rate > 0) return rate;
-        return arbitrageEngine.currentSnapshots().stream()
-            .filter(s -> s.pair().replace("/", "").equalsIgnoreCase(currency + "USDT"))
-            .findFirst()
-            .map(s -> (s.bid() + s.ask()) / 2.0)
-            .orElse(0.0);
+
+        // Step 2: live orderbook mid-price
+        var snapshots = arbitrageEngine.currentSnapshots();
+        for (var suffix : new String[]{"USDT", "USD", "USDC", "BUSD"}) {
+            var found = snapshots.stream()
+                .filter(s -> s.pair().replace("/", "").equalsIgnoreCase(currency + suffix))
+                .findFirst()
+                .map(s -> (s.bid() + s.ask()) / 2.0)
+                .orElse(0.0);
+            if (found > 0) return found;
+        }
+
+        // Step 3: BTC cross-rate fallback (e.g. ETH → ETH/BTC mid × BTC/USD)
+        var btcRate = currencyRateFeed.getCryptoRate("BTC");
+        if (btcRate > 0) {
+            var viaBtc = snapshots.stream()
+                .filter(s -> s.pair().replace("/", "").equalsIgnoreCase(currency + "BTC"))
+                .findFirst()
+                .map(s -> (s.bid() + s.ask()) / 2.0 * btcRate)
+                .orElse(0.0);
+            if (viaBtc > 0) return viaBtc;
+        }
+        return 0.0;
     }
 }

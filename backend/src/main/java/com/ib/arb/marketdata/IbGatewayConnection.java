@@ -37,6 +37,7 @@ public class IbGatewayConnection extends DefaultEWrapper {
     private volatile EClientSocket client;
     private volatile int nextOrderId = -1;
     private final AtomicBoolean connecting = new AtomicBoolean(false);
+    private final AtomicBoolean reconnectScheduled = new AtomicBoolean(false);
 
     // market data: pair (EURUSD) -> [bid, bidQty, ask, askQty]
     public final Map<String, double[]> marketData = new ConcurrentHashMap<>();
@@ -138,7 +139,9 @@ public class IbGatewayConnection extends DefaultEWrapper {
     }
 
     private void scheduleReconnect() {
+        if (!reconnectScheduled.compareAndSet(false, true)) return;
         reconnectScheduler.schedule(() -> {
+            reconnectScheduled.set(false);
             log.info("[IB] Attempting reconnect…");
             connect();
             if (isConnected() && !subscribedPairs.isEmpty()) subscribePairs(subscribedPairs);
@@ -190,6 +193,12 @@ public class IbGatewayConnection extends DefaultEWrapper {
             }
         });
         return future;
+    }
+
+    public void cancelOrder(int orderId) {
+        if (!isConnected()) return;
+        client.cancelOrder(orderId, new OrderCancel());
+        log.info("[IB] Cancel requested for order {}", orderId);
     }
 
     // ── Account ──────────────────────────────────────────────────────────────

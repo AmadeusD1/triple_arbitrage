@@ -99,6 +99,7 @@ public class CoinbasePositionClient implements PositionClient {
             var orders = new ArrayList<OpenOrder>();
             if (root.isArray()) {
                 root.forEach(o -> orders.add(new OpenOrder(
+                    "COINBASE",
                     o.path("id").asText(),
                     o.path("product_id").asText().replace("-", ""),
                     o.path("side").asText().toLowerCase(),

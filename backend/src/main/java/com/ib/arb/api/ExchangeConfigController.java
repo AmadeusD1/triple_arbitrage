@@ -45,7 +45,8 @@ public class ExchangeConfigController {
                                                   @RequestBody ExchangeConfig body) {
         return repo.findById(id).map(existing -> {
             var wasEnabled = existing.isEnabled();
-            existing.setEnabled(body.isEnabled())
+            existing.setExchange(body.getExchange())
+                    .setEnabled(body.isEnabled())
                     .setSimulation(body.isSimulation())
                     .setApiKey(body.getApiKey())
                     .setApiSecret(body.getApiSecret())

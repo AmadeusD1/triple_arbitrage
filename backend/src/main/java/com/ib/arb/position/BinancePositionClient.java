@@ -85,6 +85,7 @@ public class BinancePositionClient implements PositionClient {
             var orders = new ArrayList<OpenOrder>();
             if (root.isArray()) {
                 root.forEach(o -> orders.add(new OpenOrder(
+                    "BINANCE",
                     o.path("orderId").asText(),
                     o.path("symbol").asText(),
                     o.path("side").asText().toLowerCase(),

@@ -38,13 +38,15 @@ public class BitfinexPositionClient implements PositionClient {
 
     @Override
     public Map<String, Double> fetchBalances() {
+        String rawBody = null;
         try {
             var cfg = configRepo.findByExchange("BITFINEX").orElse(null);
             if (cfg == null || cfg.getApiKey() == null) return Map.of();
 
             var nonce   = String.valueOf(System.currentTimeMillis());
             var path    = "/v2/auth/r/wallets";
-            var payload = "/api" + path + nonce;
+            var bodyStr = "{}";
+            var payload = "/api" + path + nonce + bodyStr;
             var sig     = hmac384(cfg.getApiSecret(), payload);
 
             var request = HttpRequest.newBuilder()
@@ -53,37 +55,55 @@ public class BitfinexPositionClient implements PositionClient {
                 .header("bfx-signature", sig)
                 .header("bfx-nonce",     nonce)
                 .header("Content-Type",  "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .POST(HttpRequest.BodyPublishers.ofString(bodyStr))
                 .build();
 
-            var root     = mapper.readTree(http.send(request, HttpResponse.BodyHandlers.ofString()).body());
+            rawBody = http.send(request, HttpResponse.BodyHandlers.ofString()).body();
+            var root     = mapper.readTree(rawBody);
             var balances = new ConcurrentHashMap<String, Double>();
-            // Response: [[wallet_type, currency, balance, unsettled_interest, available, ...]]
+            // Success: [[wallet_type, currency, balance, unsettled_interest, available, ...], ...]
+            // Auth/other errors instead arrive as e.g. [MTS,"error",null,null,[...],null,"ERROR","<message>"]
+            // - not a list of wallet arrays - so only treat top-level elements that are themselves
+            // arrays as wallets, and log anything else raw instead of crashing on it.
             if (root.isArray()) {
-                root.forEach(w -> {
-                    var available = w.size() > 4 ? w.get(4).asDouble() : w.get(2).asDouble();
+                var recognizedAny = false;
+                for (var w : root) {
+                    if (!w.isArray() || w.size() < 3) continue;
+                    recognizedAny = true;
+                    var available = (w.size() > 4 && !w.get(4).isNull()) ? w.get(4).asDouble() : w.get(2).asDouble();
                     if (available > 0) {
                         var currency = w.get(1).asText().toUpperCase();
                         balances.merge(currency, available, Double::sum);
                     }
-                });
+                }
+                if (!recognizedAny && !root.isEmpty()) {
+                    log.error("[BITFINEX] fetchBalances: unrecognized response shape: {}", rawBody);
+                } else if (recognizedAny) {
+                    // Positive confirmation the key/secret authenticated successfully, even when
+                    // every wallet is empty (e.g. a brand-new account) - otherwise this call
+                    // produces no log output at all and looks identical to never having run.
+                    log.info("[BITFINEX] fetchBalances: authenticated OK, {} wallet(s), {} with positive balance",
+                        root.size(), balances.size());
+                }
             }
             return balances;
         } catch (Exception e) {
-            log.error("[BITFINEX] fetchBalances failed: {}", e.getMessage());
+            log.error("[BITFINEX] fetchBalances failed: {} | raw='{}'", e.getMessage(), rawBody);
             return Map.of();
         }
     }
 
     @Override
     public List<OpenOrder> fetchOpenOrders() {
+        String rawBody = null;
         try {
             var cfg = configRepo.findByExchange("BITFINEX").orElse(null);
             if (cfg == null || cfg.getApiKey() == null) return List.of();
 
             var nonce   = String.valueOf(System.currentTimeMillis());
             var path    = "/v2/auth/r/orders";
-            var payload = "/api" + path + nonce;
+            var bodyStr = "{}";
+            var payload = "/api" + path + nonce + bodyStr;
             var sig     = hmac384(cfg.getApiSecret(), payload);
 
             var request = HttpRequest.newBuilder()
@@ -92,16 +112,21 @@ public class BitfinexPositionClient implements PositionClient {
                 .header("bfx-signature", sig)
                 .header("bfx-nonce",     nonce)
                 .header("Content-Type",  "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .POST(HttpRequest.BodyPublishers.ofString(bodyStr))
                 .build();
 
-            var root   = mapper.readTree(http.send(request, HttpResponse.BodyHandlers.ofString()).body());
+            rawBody = http.send(request, HttpResponse.BodyHandlers.ofString()).body();
+            var root   = mapper.readTree(rawBody);
             var orders = new ArrayList<OpenOrder>();
             if (root.isArray()) {
-                root.forEach(o -> {
-                    var symbol = o.get(3).asText().startsWith("t") ? o.get(3).asText().substring(1) : o.get(3).asText();
+                for (var o : root) {
+                    // Auth/other errors arrive as a flat array (e.g. [..., "ERROR", "<message>"]),
+                    // not a list of order arrays - skip anything that isn't order-shaped.
+                    if (!o.isArray() || o.size() < 17) continue;
+                    var symbol = fromBfxSymbol(o.get(3).asText());
                     var amount = o.get(6).asDouble();
                     orders.add(new OpenOrder(
+                        "BITFINEX",
                         o.get(0).asText(),
                         symbol,
                         amount >= 0 ? "buy" : "sell",
@@ -112,13 +137,38 @@ public class BitfinexPositionClient implements PositionClient {
                         o.get(4).asDouble(),
                         "open"
                     ));
-                });
+                }
             }
             return orders;
         } catch (Exception e) {
-            log.error("[BITFINEX] fetchOpenOrders failed: {}", e.getMessage());
+            log.error("[BITFINEX] fetchOpenOrders failed: {} | raw='{}'", e.getMessage(), rawBody);
             return List.of();
         }
+    }
+
+    // Bitfinex uses its own 3-letter codes for USDT ("UST") and USDC ("UDC"); see
+    // BitfinexOrderClient/BitfinexOrderBookFeed for the matching outbound conversion.
+    private static String fromBfxCode(String code) {
+        return switch (code) {
+            case "UST" -> "USDT";
+            case "UDC" -> "USDC";
+            default -> code;
+        };
+    }
+
+    /** Reverses the outbound symbol conversion: tBTCUST -> BTCUSDT, tDOGE:USD -> DOGEUSD. */
+    private static String fromBfxSymbol(String symbol) {
+        var body = symbol.startsWith("t") ? symbol.substring(1) : symbol;
+        String base, quote;
+        if (body.contains(":")) {
+            var parts = body.split(":", 2);
+            base = parts[0];
+            quote = parts[1];
+        } else {
+            base = body.substring(0, 3);
+            quote = body.substring(3);
+        }
+        return fromBfxCode(base) + fromBfxCode(quote);
     }
 
     private static String hmac384(String secret, String data) throws Exception {

@@ -106,6 +106,7 @@ public class BitstampPositionClient implements PositionClient {
             var orders = new ArrayList<OpenOrder>();
             if (root.isArray()) {
                 root.forEach(o -> orders.add(new OpenOrder(
+                    "BITSTAMP",
                     o.path("id").asText(),
                     o.path("currency_pair").asText().replace("/", "").toUpperCase(),
                     o.path("type").asInt() == 0 ? "buy" : "sell",

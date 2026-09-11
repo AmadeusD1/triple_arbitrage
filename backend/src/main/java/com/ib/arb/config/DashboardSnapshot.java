@@ -20,6 +20,9 @@ import java.util.Map;
  * @param fxRates                   latest USD rates from the currency aggregator feed
  * @param recentMissedOpportunities last 1000 missed opportunities ordered by time descending
  * @param exchangeRunning           per-exchange scan loop running state (exchange name → boolean)
+ * @param exchangeAlerts            per-exchange critical alerts (exchange name → message), only
+ *                                   present when an exchange has been auto-stopped due to a
+ *                                   live order rejection (e.g. a precision error)
  */
 public record DashboardSnapshot(
     double dailyProfitAndLoss,
@@ -30,5 +33,6 @@ public record DashboardSnapshot(
     boolean tradeInProgress,
     Map<String, Double> fxRates,
     List<MissedOpportunity> recentMissedOpportunities,
-    Map<String, Boolean> exchangeRunning
+    Map<String, Boolean> exchangeRunning,
+    Map<String, String> exchangeAlerts
 ) {}

@@ -1,8 +1,9 @@
 import axios from 'axios';
 import type { AxiosResponse } from 'axios';
 import type {
-  AppUser, ArbitrageStats, AuthUser, BalanceEntry, CycleDirection, EquityPoint, ExecutionStats,
-  ExchangeConfig, OrderLeg, OpenOrder, Setting, Trade, TradeDetail, TriangleConfig,
+  AppUser, ArbitrageStats, AuthUser, BalanceEntry, CancelOrderResponse, CycleDirection, EquityPoint,
+  ExecutionStats, ExchangeConfig, ManualOrderRequest, ManualOrderResponse, ManualTradePrecision,
+  OrderLeg, OpenOrder, Setting, Trade, TradeDetail, TriangleConfig,
 } from '../types';
 
 const client = axios.create({ baseURL: '/api' });
@@ -49,6 +50,8 @@ export const putSettings           = (data: Record<string, number>): Promise<Axi
 export const getBrokerHealth       = (): Promise<AxiosResponse<BrokerHealth>>       => client.get('/broker/health');
 export const getPositions          = (): Promise<AxiosResponse<BalanceEntry[]>>     => client.get('/positions');
 export const getOpenOrders         = (): Promise<AxiosResponse<OpenOrder[]>>        => client.get('/orders/open');
+export const cancelOpenOrder       = (exchange: string, txid: string, pair: string): Promise<AxiosResponse<CancelOrderResponse>> =>
+  client.post('/orders/cancel', { exchange, txid, pair });
 
 export const clearMissedOpportunities = (): Promise<AxiosResponse<void>> =>
   client.delete('/missed-opportunities');
@@ -61,12 +64,20 @@ export const getTriangles    = (): Promise<AxiosResponse<TriangleConfig[]>>     
 export const createTriangle  = (data: TrianglePayload): Promise<AxiosResponse<TriangleConfig>> => client.post('/triangles', data);
 export const updateTriangle  = (id: number, data: TrianglePayload): Promise<AxiosResponse<TriangleConfig>> => client.put(`/triangles/${id}`, data);
 export const deleteTriangle  = (id: number): Promise<AxiosResponse<void>>            => client.delete(`/triangles/${id}`);
+export const applySnapshotStaleMs = (value: number): Promise<AxiosResponse<void>>    => client.put('/triangles/stale-ms/apply', { value });
 
 type ExchangePayload = Omit<ExchangeConfig, 'id' | 'createdAt'>;
 export const getExchangeConfigs    = (): Promise<AxiosResponse<ExchangeConfig[]>>   => client.get('/exchanges');
 export const createExchangeConfig  = (data: ExchangePayload): Promise<AxiosResponse<ExchangeConfig>> => client.post('/exchanges', data);
 export const updateExchangeConfig  = (id: number, data: ExchangePayload): Promise<AxiosResponse<ExchangeConfig>> => client.put(`/exchanges/${id}`, data);
 export const deleteExchangeConfig  = (id: number): Promise<AxiosResponse<void>>    => client.delete(`/exchanges/${id}`);
+
+export const getManualTradePairs     = (exchange: string): Promise<AxiosResponse<string[]>> =>
+  client.get(`/manual-trade/pairs/${exchange}`);
+export const getManualTradePrecision = (exchange: string, pair: string): Promise<AxiosResponse<ManualTradePrecision>> =>
+  client.get(`/manual-trade/precision/${exchange}/${pair}`);
+export const submitManualOrder       = (data: ManualOrderRequest): Promise<AxiosResponse<ManualOrderResponse>> =>
+  client.post('/manual-trade/order', data);
 
 export const getUsers   = ():                                            Promise<AxiosResponse<AppUser[]>> => client.get('/users');
 export const createUser = (username: string, password: string, role: string): Promise<AxiosResponse<AppUser>> => client.post('/users', { username, password, role });

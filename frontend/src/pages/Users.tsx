@@ -14,7 +14,7 @@ const ROLES = ['USER', 'QUANT', 'ADMIN'] as const;
 type Role = typeof ROLES[number];
 
 const ROLE_DESCRIPTIONS: Record<Role, string> = {
-  USER:  'Dashboard, Trades, Feeds',
+  USER:  'Dashboard, Trades, Tickers, CCY Rates, Fiat Rates',
   QUANT: 'All pages except Users',
   ADMIN: 'Full access',
 };

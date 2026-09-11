@@ -28,6 +28,7 @@ public class BybitOrderBookFeed implements OrderBookFeed {
     private static final String WS_URL = "wss://stream.bybit.com/v5/public/spot";
 
     private final Map<String, OrderBook> snapshots = new ConcurrentHashMap<>();
+    private volatile Runnable onUpdate = () -> {};
     private final Map<String, TreeMap<Double, Double>> bidBooks = new ConcurrentHashMap<>();
     private final Map<String, TreeMap<Double, Double>> askBooks = new ConcurrentHashMap<>();
 
@@ -78,6 +79,18 @@ public class BybitOrderBookFeed implements OrderBookFeed {
 
     @Override
     public boolean isConnected() { return connected; }
+    @Override public void setOnUpdate(Runnable onUpdate) { this.onUpdate = onUpdate; }
+
+    @Override
+    public void invalidate(String pair) {
+        snapshots.remove(pair);
+        bidBooks.remove(pair);
+        askBooks.remove(pair);
+    }
+
+    private void touchSnapshots() {
+        snapshots.replaceAll((p, ob) -> ob.touched());
+    }
 
     private void connect() {
         if (!connecting.compareAndSet(false, true)) return;
@@ -104,8 +117,11 @@ public class BybitOrderBookFeed implements OrderBookFeed {
         try {
             var node = mapper.readTree(json);
 
-            // Ignore op responses (subscribe acks, pong, etc.)
-            if (node.has("op")) return;
+            if (node.has("op")) {
+                if ("pong".equals(node.path("ret_msg").asText()) || "pong".equals(node.path("op").asText()))
+                    touchSnapshots();
+                return;
+            }
 
             var topic = node.path("topic").asText();
             if (!topic.startsWith("orderbook.")) return;
@@ -140,6 +156,7 @@ public class BybitOrderBookFeed implements OrderBookFeed {
                 snapshots.put(pair, new OrderBook(pair,
                     bestBid.getKey(), bestBid.getValue(),
                     bestAsk.getKey(), bestAsk.getValue()));
+                onUpdate.run();
             }
         } catch (Exception ignored) {}
     }

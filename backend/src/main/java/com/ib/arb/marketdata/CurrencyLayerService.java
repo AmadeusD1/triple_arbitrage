@@ -27,17 +27,29 @@ public class CurrencyLayerService {
 
     private static final Logger log = LoggerFactory.getLogger(CurrencyLayerService.class);
 
-    private static final String CURRENCIES = "TRY,KRW,JPY,AUD,EUR,GBP,NZD,CAD,BTC,CHF,AED";
+    private static final String USD_CURRENCIES = "TRY,KRW,JPY,AUD,EUR,GBP,NZD,CAD,CHF,AED";
+    private static final String EUR_CURRENCIES = "CHF,GBP";
 
     @Value("${currency.layer.api-key:e31dcd26cbbffa7b035150766e41ddb6}")
     private String apiKey;
 
+    // USD-denominated: "EUR" → EUR/USD, "TRY" → TRY/USD, etc.
     private final Map<String, Double> rates = new ConcurrentHashMap<>();
+    // EUR cross rates: "EUR/CHF" → rate, "EUR/GBP" → rate
+    private final Map<String, Double> eurCrossRates = new ConcurrentHashMap<>();
     private final RestClient restClient = RestClient.create();
 
     @PostConstruct
     public void init() {
         fetch();
+    }
+
+    /** Returns all rates: USD-denominated keyed as "CCY/USD", plus EUR cross rates. */
+    public Map<String, Double> getAllRates() {
+        var merged = new java.util.HashMap<String, Double>();
+        rates.forEach((ccy, rate) -> merged.put(ccy + "/USD", rate));
+        merged.putAll(eurCrossRates);
+        return java.util.Collections.unmodifiableMap(merged);
     }
 
     /** Returns the USD value of 1 unit of {@code isoCurrency}, or {@code 0.0} if unknown. */
@@ -48,26 +60,48 @@ public class CurrencyLayerService {
 
     @Scheduled(fixedDelayString = "${currency.layer.poll-interval-ms:10000}")
     public void fetch() {
+        fetchUsd();
+        fetchEur();
+    }
+
+    private void fetchUsd() {
         var url = "http://apilayer.net/api/live?access_key=" + apiKey
-                + "&source=USD&currencies=" + CURRENCIES;
+                + "&source=USD&currencies=" + USD_CURRENCIES;
         try {
-            var response = restClient.get()
-                    .uri(url)
-                    .retrieve()
-                    .body(CurrencyLayerResponse.class);
+            var response = restClient.get().uri(url).retrieve().body(CurrencyLayerResponse.class);
             if (response == null || !response.success || response.quotes == null) {
-                log.warn("[CurrencyLayer] API returned an unsuccessful response");
-                return;
+                log.warn("[CurrencyLayer] USD fetch returned unsuccessful response"); return;
             }
             response.quotes.forEach((pair, value) -> {
-                // pair = "USDXXX" (6 chars), value = USD units per 1 USD → invert to get USD per 1 XXX
                 if (pair.length() == 6 && pair.startsWith("USD") && value > 0) {
-                    rates.put(pair.substring(3), 1.0 / value);
+                    var ccy = pair.substring(3);
+                    var rate = 1.0 / value;
+                    if (!Double.valueOf(rate).equals(rates.put(ccy, rate)))
+                        log.info("[CurrencyLayer] {}/USD = {}", ccy, rate);
                 }
             });
-            log.info("[CurrencyLayer] Fetched {} rates", rates.size());
         } catch (Exception e) {
-            log.warn("[CurrencyLayer] Fetch failed: {}", e.getMessage());
+            log.warn("[CurrencyLayer] USD fetch failed: {}", e.getMessage());
+        }
+    }
+
+    private void fetchEur() {
+        var url = "http://apilayer.net/api/live?access_key=" + apiKey
+                + "&source=EUR&currencies=" + EUR_CURRENCIES;
+        try {
+            var response = restClient.get().uri(url).retrieve().body(CurrencyLayerResponse.class);
+            if (response == null || !response.success || response.quotes == null) {
+                log.warn("[CurrencyLayer] EUR fetch returned unsuccessful response"); return;
+            }
+            response.quotes.forEach((pair, value) -> {
+                if (pair.length() == 6 && pair.startsWith("EUR") && value > 0) {
+                    var key = "EUR/" + pair.substring(3);
+                    if (!Double.valueOf(value).equals(eurCrossRates.put(key, value)))
+                        log.info("[CurrencyLayer] {} = {}", key, value);
+                }
+            });
+        } catch (Exception e) {
+            log.warn("[CurrencyLayer] EUR fetch failed: {}", e.getMessage());
         }
     }
 

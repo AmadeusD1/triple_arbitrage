@@ -105,8 +105,8 @@ public class ArbitrageEngine {
 
         if (best.isPresent()) {
             var s = best.get();
-            log.info("[SCAN] {} best signal — triangle={} cycle={} edge={}",
-                exchange, s.config().getId(), s.cycle(), String.format("%.5f", s.profit()));
+            log.info("[SCAN] {} best signal — triangle=#{} cycle={} edge={}",
+                exchange, s.config().getDisplayOrder(), s.cycle(), String.format("%.5f", s.profit()));
         } else {
             log.debug("[SCAN] {} — no profitable opportunity", exchange);
         }
@@ -123,11 +123,16 @@ public class ArbitrageEngine {
             if (b1 == null) missing.add(config.getPair1());
             if (b2 == null) missing.add(config.getPair2());
             if (b3 == null) missing.add(config.getPair3());
-            log.warn("[SCAN] Triangle={} — no snapshot for pair(s): {}", config.getId(), missing);
+            log.warn("[SCAN] Triangle #{} — no snapshot for pair(s): {}", config.getDisplayOrder(), missing);
             return Optional.empty();
         }
         if (!b1.isValid() || !b2.isValid() || !b3.isValid()) {
-            log.warn("[SCAN] Triangle={} — invalid snapshot(s)", config.getId());
+            log.warn("[SCAN] Triangle #{} — invalid snapshot(s)", config.getDisplayOrder());
+            return Optional.empty();
+        }
+        if (b1.isStale(config.getStaleMs1()) || b2.isStale(config.getStaleMs2()) || b3.isStale(config.getStaleMs3())) {
+            log.warn("[SCAN] Triangle #{} — stale snapshot(s) (thresholds: {}ms/{}ms/{}ms), skipping",
+                config.getDisplayOrder(), config.getStaleMs1(), config.getStaleMs2(), config.getStaleMs3());
             return Optional.empty();
         }
 
@@ -146,5 +151,16 @@ public class ArbitrageEngine {
             return Optional.of(new Signal(feed.getExchange(), config, cycle, edge, b1, b2, b3));
         }
         return Optional.empty();
+    }
+
+    public void invalidateSnapshots(Exchange exchange, String pair1, String pair2, String pair3) {
+        feeds.stream()
+            .filter(f -> f.getExchange() == exchange)
+            .findFirst()
+            .ifPresent(feed -> {
+                feed.invalidate(pair1);
+                feed.invalidate(pair2);
+                feed.invalidate(pair3);
+            });
     }
 }

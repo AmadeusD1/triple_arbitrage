@@ -3,6 +3,7 @@ package com.ib.arb.api;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TradeLeg;
 import com.ib.arb.repository.TradeRepository;
+import com.ib.arb.repository.TriangleConfigRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -21,9 +22,11 @@ import java.util.List;
 public class TradeController {
 
     private final TradeRepository tradeRepo;
+    private final TriangleConfigRepository triangleRepo;
 
-    public TradeController(TradeRepository tradeRepo) {
+    public TradeController(TradeRepository tradeRepo, TriangleConfigRepository triangleRepo) {
         this.tradeRepo = tradeRepo;
+        this.triangleRepo = triangleRepo;
     }
 
     @GetMapping
@@ -34,7 +37,9 @@ public class TradeController {
     @DeleteMapping("/simulation")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteSimulationTrades() {
-        tradeRepo.deleteByStatus(SIMULATION);
+        tradeRepo.deleteLegsByStatus(SIMULATION);
+        tradeRepo.deleteTradesByStatus(SIMULATION);
+        triangleRepo.resetAllStats();
     }
 
     @GetMapping("/{id}")
@@ -49,6 +54,7 @@ public class TradeController {
         double spread, double pnl, String status, double latencyMs,
         double orderSize, double expectedPnl,
         Double realProfit, Double realProfitPercent,
+        Double profitPercent,
         List<TradeLeg> legs
     ) {
         static TradeDetail from(Trade t) {
@@ -56,6 +62,7 @@ public class TradeController {
                 t.getSpread(), t.getPnl(), t.getStatus(), t.getLatencyMs(),
                 t.getOrderSize(), t.getExpectedPnl(),
                 t.getRealProfit(), t.getRealProfitPercent(),
+                t.getProfitPercent(),
                 t.getLegs());
         }
     }

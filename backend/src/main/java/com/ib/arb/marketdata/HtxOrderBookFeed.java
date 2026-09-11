@@ -38,6 +38,7 @@ public class HtxOrderBookFeed implements OrderBookFeed {
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ScheduledExecutorService reconnectScheduler = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, OrderBook> snapshots = new ConcurrentHashMap<>();
+    private volatile Runnable onUpdate = () -> {};
 
     private volatile boolean connected = false;
     private volatile boolean stopped = false;
@@ -52,6 +53,7 @@ public class HtxOrderBookFeed implements OrderBookFeed {
     @Override public Exchange getExchange() { return Exchange.HTX; }
     @Override public OrderBook getSnapshot(String pair) { return snapshots.get(pair.replace("/", "").toUpperCase()); }
     @Override public boolean isConnected() { return connected; }
+    @Override public void setOnUpdate(Runnable onUpdate) { this.onUpdate = onUpdate; }
 
     @Override
     public void subscribe(List<String> pairs) {
@@ -137,6 +139,7 @@ public class HtxOrderBookFeed implements OrderBookFeed {
 
             if (bid > 0 && ask > 0) {
                 snapshots.put(symbol, new OrderBook(symbol, bid, bidQty, ask, askQty));
+                onUpdate.run();
             }
         } catch (Exception ignored) {}
     }

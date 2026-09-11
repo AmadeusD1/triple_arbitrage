@@ -106,6 +106,7 @@ public class HtxPositionClient implements PositionClient {
             var root   = mapper.readTree(http.send(request, HttpResponse.BodyHandlers.ofString()).body());
             var orders = new ArrayList<OpenOrder>();
             root.path("data").forEach(o -> orders.add(new OpenOrder(
+                "HTX",
                 o.path("id").asText(),
                 o.path("symbol").asText().toUpperCase(),
                 o.path("type").asText().contains("buy") ? "buy" : "sell",

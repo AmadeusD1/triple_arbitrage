@@ -18,6 +18,10 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class DashboardWebSocketHandler extends TextWebSocketHandler {
@@ -25,6 +29,13 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
     private final Set<WebSocketSession> sessions = new CopyOnWriteArraySet<>();
     private final ObjectMapper mapper;
     private volatile String lastPayload = null;
+
+    private final ScheduledExecutorService debouncer = Executors.newSingleThreadScheduledExecutor(r -> {
+        var t = new Thread(r, "ws-broadcast-debounce");
+        t.setDaemon(true);
+        return t;
+    });
+    private volatile ScheduledFuture<?> pending = null;
 
     private final AnalyticsService analytics;
     private final List<OrderClient> orderClients;
@@ -68,6 +79,13 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
         sessions.remove(session);
     }
 
+    public void scheduleBroadcast() {
+        if (sessions.isEmpty()) return;
+        var existing = pending;
+        if (existing != null) existing.cancel(false);
+        pending = debouncer.schedule(this::broadcast, 50, TimeUnit.MILLISECONDS);
+    }
+
     public void broadcast() {
         var anyConnected = orderClients.stream().anyMatch(OrderClient::isConnected);
         send(new DashboardSnapshot(
@@ -79,7 +97,8 @@ public class DashboardWebSocketHandler extends TextWebSocketHandler {
             autoTrader.isExecuting(),
             currencyRateFeed.getAllRates(),
             missedOpportunityRepo.findTop1000ByOrderByTimeDesc(),
-            exchangeManager.exchangeRunningStates()
+            exchangeManager.exchangeRunningStates(),
+            exchangeManager.exchangeAlerts()
         ));
     }
 

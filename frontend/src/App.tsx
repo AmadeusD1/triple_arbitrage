@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { Component, useState } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import {
   CircularProgress, Box, Button, CssBaseline, ThemeProvider, createTheme,
   Drawer, IconButton, List, ListItemButton, ListItemText, Divider,
@@ -12,7 +13,9 @@ import Login from './pages/Login';
 import Analytics from './pages/Analytics';
 import OpenOrders from './pages/OpenOrders';
 import Positions from './pages/Positions';
+import CcyRates from './pages/CcyRates';
 import CurrencyRates from './pages/CurrencyRates';
+import ManualTrade from './pages/ManualTrade';
 import MissedOpportunities from './pages/MissedOpportunities';
 import Prices from './pages/Prices';
 import Settings from './pages/Settings';
@@ -22,7 +25,34 @@ import Users from './pages/Users';
 
 const theme = createTheme({ palette: { mode: 'dark' } });
 
-const PAGES = ['/', '/trades', '/missed-opportunities', '/positions', '/open-orders', '/analytics', '/prices', '/currency-rates', '/settings', '/triangles', '/users'] as const;
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[ErrorBoundary]', error, info.componentStack);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <Box sx={{ p: 4, color: 'error.main' }}>
+          <strong>Something went wrong.</strong>
+          <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginTop: 8 }}>
+            {this.state.error.message}
+          </pre>
+          <Button variant="outlined" size="small" onClick={() => this.setState({ error: null })}>
+            Retry
+          </Button>
+        </Box>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const PAGES = ['/', '/trades', '/missed-opportunities', '/positions', '/open-orders', '/analytics', '/prices', '/ccy-rates', '/currency-rates', '/manual-trade', '/settings', '/triangles', '/users'] as const;
 
 // USER  → dashboard, trades, feeds only
 // QUANT → everything except /users
@@ -30,7 +60,7 @@ const PAGES = ['/', '/trades', '/missed-opportunities', '/positions', '/open-ord
 function canAccess(role: string, path: string): boolean {
   if (role === 'ADMIN') return true;
   if (role === 'QUANT') return path !== '/users';
-  return ['/', '/trades', '/prices', '/currency-rates'].includes(path);
+  return ['/', '/trades', '/prices', '/ccy-rates', '/currency-rates'].includes(path);
 }
 
 function NavBar() {
@@ -60,8 +90,10 @@ function NavBar() {
     ...(canAccess(role, '/positions')    ? [{ href: '/positions',    label: 'Positions' }]        : []),
     ...(canAccess(role, '/open-orders')  ? [{ href: '/open-orders',  label: 'Open Orders' }]      : []),
     ...(canAccess(role, '/analytics')   ? [{ href: '/analytics',    label: 'Analytics' }]          : []),
-    { href: '/prices',                label: 'Feeds' },
-    { href: '/currency-rates',        label: 'Currency Rates' },
+    { href: '/prices',                label: 'Tickers' },
+    { href: '/ccy-rates',             label: 'CCY Rates' },
+    { href: '/currency-rates',        label: 'Fiat Rates' },
+    ...(canAccess(role, '/manual-trade') ? [{ href: '/manual-trade', label: 'Manual Trade' }]     : []),
     ...(canAccess(role, '/triangles')   ? [{ href: '/triangles',    label: 'Exchange Settings' }] : []),
     ...(canAccess(role, '/settings')    ? [{ href: '/settings',     label: 'Settings' }]          : []),
     ...(canAccess(role, '/users')       ? [{ href: '/users',        label: 'Users' }]             : []),
@@ -102,8 +134,10 @@ function NavBar() {
             </Box>
             <Box sx={{ flex: 1 }} />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              {nav('/prices', 'Feeds')}
-              {nav('/currency-rates', 'Currency Rates')}
+              {nav('/prices', 'Tickers')}
+              {nav('/ccy-rates', 'CCY Rates')}
+              {nav('/currency-rates', 'Fiat Rates')}
+              {canAccess(role, '/manual-trade') && nav('/manual-trade', 'Manual Trade')}
               {canAccess(role, '/triangles') && nav('/triangles', 'Exchange Settings')}
               {canAccess(role, '/settings')  && nav('/settings',  'Settings')}
               {canAccess(role, '/users')     && nav('/users',     'Users')}
@@ -164,12 +198,15 @@ function AppRoutes() {
         {path === '/open-orders'  && canAccess(role, path) && <OpenOrders />}
         {path === '/analytics'   && canAccess(role, path) && <Analytics />}
         {path === '/prices'       && <Prices      prices={live?.prices ?? []} />}
+        {path === '/ccy-rates'    && <CcyRates />}
         {path === '/currency-rates'     && <CurrencyRates     rates={live?.fxRates ?? {}} />}
+        {path === '/manual-trade' && canAccess(role, path) && <ManualTrade />}
         {path === '/settings'     && canAccess(role, path) && <Settings />}
         {path === '/triangles'    && canAccess(role, path) && <Triangles prices={live?.prices ?? []} exchangeRunning={live?.exchangeRunning ?? {}} />}
         {path === '/users'        && canAccess(role, path) && <Users />}
         {path !== '/trades' && path !== '/missed-opportunities' && path !== '/positions' &&
-         path !== '/open-orders' && path !== '/analytics' && path !== '/prices' && path !== '/currency-rates' &&
+         path !== '/open-orders' && path !== '/analytics' && path !== '/prices' && path !== '/ccy-rates' &&
+         path !== '/currency-rates' && path !== '/manual-trade' &&
          path !== '/settings' && path !== '/triangles' && path !== '/users' && <Dashboard />}
       </Box>
     </Box>
@@ -180,9 +217,11 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
+      <ErrorBoundary>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </ErrorBoundary>
     </ThemeProvider>
   );
 }

@@ -10,6 +10,9 @@ import {
 import type { SelectChangeEvent } from '@mui/material';
 import type { Trade } from '../types';
 
+const n  = (v: unknown, d: number) => (isFinite(Number(v)) ? Number(v) : 0).toFixed(d);
+const sp = (v: unknown) => { const x = Number(v); return isFinite(x) ? x : 0; };
+
 const TZ = 'America/Chicago';
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -48,7 +51,7 @@ function buildData(
     const map = new Map<number, number>();
     for (const t of trades) {
       const { year: y } = dateParts(parseUTC(t.time));
-      map.set(y, (map.get(y) ?? 0) + t.pnl);
+      map.set(y, (map.get(y) ?? 0) + sp(t.pnl));
     }
     return [...map.entries()]
       .sort(([a], [b]) => a - b)
@@ -60,7 +63,7 @@ function buildData(
     for (const t of trades) {
       const { year: y, month: m } = dateParts(parseUTC(t.time));
       if (y !== year) continue;
-      map.set(m, (map.get(m) ?? 0) + t.pnl);
+      map.set(m, (map.get(m) ?? 0) + sp(t.pnl));
     }
     // Only show months that have data — no leading/trailing zero bars
     return [...map.entries()]
@@ -73,7 +76,7 @@ function buildData(
     for (const t of trades) {
       const { year: y, month: mo, day } = dateParts(parseUTC(t.time));
       if (y !== year || mo !== month) continue;
-      map.set(day, (map.get(day) ?? 0) + t.pnl);
+      map.set(day, (map.get(day) ?? 0) + sp(t.pnl));
     }
     // Show every day of the month (0 bars for days with no trades)
     const count = daysInMonth(year, month);
@@ -233,7 +236,7 @@ export default function Histograms({ trades, exchanges }: Props) {
               {chartData!.length} bucket{chartData!.length !== 1 ? 's' : ''}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Total: {totalPnl! >= 0 ? '+' : ''}${totalPnl!.toFixed(4)}
+              Total: {Number(totalPnl!) >= 0 ? '+' : ''}${n(totalPnl!, 4)}
             </Typography>
           </Box>
         )}
@@ -243,14 +246,14 @@ export default function Histograms({ trades, exchanges }: Props) {
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
             <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#aaa' }} />
             <YAxis
-              tickFormatter={(v: number) => `$${v.toFixed(2)}`}
+              tickFormatter={(v: unknown) => `$${n(v, 2)}`}
               tick={{ fontSize: 11, fill: '#aaa' }}
             />
             {hasData && (
               <>
                 <RechartsTooltip
                   cursor={false}
-                  formatter={(v: unknown) => [`$${(v as number).toFixed(4)}`, 'Profit']}
+                  formatter={(v: unknown) => [`$${n(v, 4)}`, 'Profit']}
                   contentStyle={{ background: '#1e1e2e', border: '1px solid #333', borderRadius: 6 }}
                   labelStyle={{ color: '#ccc' }}
                   itemStyle={{ color: '#fff' }}

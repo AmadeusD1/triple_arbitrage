@@ -20,7 +20,7 @@ public interface PositionClient {
     List<OpenOrder> fetchOpenOrders();
 
     record OpenOrder(
-        String txid, String pair, String side, String orderType,
+        String exchange, String txid, String pair, String side, String orderType,
         double price, double volume, double volumeFilled,
         double openTime, String status) {}
 }
