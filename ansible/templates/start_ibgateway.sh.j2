@@ -1,0 +1,13 @@
+#!/bin/bash
+# IB Gateway via Podman container — managed by Ansible (templates/start_ibgateway.sh.j2)
+
+exec podman run --rm --name ibgateway \
+  -e TWS_USERID={{ ib_paper_username }} \
+  -e TWS_PASSWORD={{ ib_paper_password }} \
+  -e TRADING_MODE=paper \
+  -e TWS_ACCEPT_INCOMING=accept \
+  -e TWS_READONLY=no \
+  -e VNC_SERVER_PASSWORD={{ ib_vnc_password }} \
+  -e EXISTING_SESSION_DETECTED_ACTION=primary \
+  --network host \
+  ghcr.io/gnzsnz/ib-gateway:stable

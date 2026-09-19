@@ -1,0 +1,46 @@
+---
+# ── IB Gateway (paper trading) — can be run standalone or imported by playbook.yml ──
+- name: Provision IB Gateway
+  hosts: appservers
+  become: true
+
+  handlers:
+    - name: restart ibgateway
+      systemd:
+        name: ibgateway
+        state: restarted
+        daemon_reload: true
+
+  tasks:
+
+    - name: Install podman
+      dnf:
+        name: podman
+        state: present
+
+    - name: Deploy IB Gateway start script
+      template:
+        src: templates/start_ibgateway.sh.j2
+        dest: /usr/local/bin/start_ibgateway.sh
+        owner: root
+        group: root
+        mode: "0755"
+      notify: restart ibgateway
+
+    - name: Apply SELinux context to start script
+      command: restorecon -v /usr/local/bin/start_ibgateway.sh
+      changed_when: false
+
+    - name: Install ibgateway systemd service
+      template:
+        src: templates/ibgateway.service.j2
+        dest: /etc/systemd/system/ibgateway.service
+        mode: "0644"
+      notify: restart ibgateway
+
+    - name: Enable and start ibgateway service
+      systemd:
+        name: ibgateway
+        enabled: true
+        state: started
+        daemon_reload: true

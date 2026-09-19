@@ -19,3 +19,8 @@ kraken_api_secret: " 2+xhOGxgWPDLgDyenaoOkabb79c0sTtu02FNPIpphOKZzZe209Le+NKYDPm
 # Nginx
 http_port: 80
 server_name: "_"               # replace with your domain name if available
+
+# IB Gateway (paper trading) — credentials for /usr/local/bin/start_ibgateway.sh
+ib_paper_username: "maksemli1p"
+ib_paper_password: "lamitpO535p"     # use ansible-vault for production
+ib_vnc_password: "Vn29?5%Q"       # use ansible-vault for production

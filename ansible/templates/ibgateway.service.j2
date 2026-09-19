@@ -1,0 +1,13 @@
+[Unit]
+Description=IB Gateway (paper trading)
+After=network.target
+
+[Service]
+Type=simple
+User={{ ansible_user }}
+ExecStart=/usr/local/bin/start_ibgateway.sh
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

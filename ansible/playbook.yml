@@ -21,7 +21,10 @@
 # ── Play 2: PostgreSQL ────────────────────────────────────────────────────────
 - import_playbook: postgres.yml
 
-# ── Play 3: Deploy application ────────────────────────────────────────────────
+# ── Play 3: IB Gateway (paper trading) ────────────────────────────────────────
+- import_playbook: ibgateway.yml
+
+# ── Play 4: Deploy application ────────────────────────────────────────────────
 - name: Deploy ARB application
   hosts: appservers
   become: true
