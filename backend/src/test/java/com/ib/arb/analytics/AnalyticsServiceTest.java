@@ -103,50 +103,36 @@ class AnalyticsServiceTest {
         assertThat(analytics.winRate()).isEqualTo(50.0);
     }
 
-    // ── sharpe ────────────────────────────────────────────────────────────────
-
-    @Test
-    void sharpe_returnsZero_whenNoTrades() {
-        when(tradeRepo.findAll()).thenReturn(List.of());
-        assertThat(analytics.sharpe()).isEqualTo(0.0);
-    }
-
-    @Test
-    void sharpe_returnsZero_whenAllPnlIdentical() {
-        // std = 0 → sharpe = 0
-        when(tradeRepo.findAll()).thenReturn(List.of(trade(1), trade(1), trade(1)));
-        assertThat(analytics.sharpe()).isEqualTo(0.0);
-    }
-
-    @Test
-    void sharpe_isPositive_whenMeanPositive() {
-        when(tradeRepo.findAll()).thenReturn(List.of(trade(3), trade(5)));
-        assertThat(analytics.sharpe()).isGreaterThan(0);
-    }
-
-    @Test
-    void sharpe_isNegative_whenMeanNegative() {
-        when(tradeRepo.findAll()).thenReturn(List.of(trade(-3), trade(-5)));
-        assertThat(analytics.sharpe()).isLessThan(0);
-    }
-
     // ── equityCurve ───────────────────────────────────────────────────────────
 
     @Test
     void equityCurve_isEmpty_whenNoTrades() {
         when(tradeRepo.findAll()).thenReturn(List.of());
-        assertThat(analytics.equityCurve()).isEmpty();
+        assertThat(analytics.equityCurve("ALL")).isEmpty();
     }
 
     @Test
     void equityCurve_buildsCumulativeValues() {
         when(tradeRepo.findAll()).thenReturn(List.of(trade(10), trade(-3), trade(5)));
 
-        var curve = analytics.equityCurve();
+        var curve = analytics.equityCurve("ALL");
 
         assertThat(curve).hasSize(3);
         assertThat(curve.get(0).equity()).isEqualTo(10.0);
         assertThat(curve.get(1).equity()).isEqualTo(7.0);
         assertThat(curve.get(2).equity()).isEqualTo(12.0);
+    }
+
+    @Test
+    void equityCurve_filtersByStatus() {
+        var filled = trade(10);
+        var cancelled = trade(-3);
+        cancelled.setStatus("CANCELLED");
+        when(tradeRepo.findAll()).thenReturn(List.of(filled, cancelled));
+
+        var curve = analytics.equityCurve("FILLED");
+
+        assertThat(curve).hasSize(1);
+        assertThat(curve.get(0).equity()).isEqualTo(10.0);
     }
 }

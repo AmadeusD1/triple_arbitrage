@@ -1,7 +1,8 @@
 package com.ib.arb.risk;
 
-import com.ib.arb.model.Setting;
-import com.ib.arb.repository.SettingRepository;
+import com.ib.arb.marketdata.Exchange;
+import com.ib.arb.model.ExchangeConfig;
+import com.ib.arb.repository.ExchangeConfigRepository;
 import com.ib.arb.repository.TradeRepository;
 import org.junit.jupiter.api.Test;
 
@@ -15,53 +16,54 @@ import static org.mockito.Mockito.when;
 
 class RiskServiceTest {
 
-    SettingRepository settings = mock(SettingRepository.class);
-    TradeRepository trades     = mock(TradeRepository.class);
-    RiskService riskService    = new RiskService(settings, trades);
+    ExchangeConfigRepository configRepo = mock(ExchangeConfigRepository.class);
+    TradeRepository trades              = mock(TradeRepository.class);
+    RiskService riskService             = new RiskService(configRepo, trades);
 
-    private void givenSetting(String key, double value) {
-        var s = new Setting();
-        s.setKey(key);
-        s.setValue(value);
-        when(settings.findById(key)).thenReturn(Optional.of(s));
+    private void givenConfig(double positionLimit, double maxDailyLoss) {
+        var cfg = new ExchangeConfig()
+            .setExchange("KRAKEN")
+            .setPositionLimitUsd(positionLimit)
+            .setMaxDailyLossUsd(maxDailyLoss);
+        when(configRepo.findByExchange("KRAKEN")).thenReturn(Optional.of(cfg));
     }
 
     // ── position limit ────────────────────────────────────────────────────────
 
     @Test
     void allows_whenOrderSizeWithinPositionLimit() {
-        givenSetting("position_limit", 100_000.0);
-        when(trades.sumPnlSince(any())).thenReturn(0.0);
+        givenConfig(100_000.0, -1_000.0);
+        when(trades.sumPnlSinceForExchange(any(), eq("KRAKEN"))).thenReturn(0.0);
 
-        assertThat(riskService.check(50_000.0).allowed()).isTrue();
+        assertThat(riskService.check(Exchange.KRAKEN, 50_000.0).allowed()).isTrue();
     }
 
     @Test
     void blocks_whenOrderSizeExceedsPositionLimit() {
-        givenSetting("position_limit", 50_000.0);
+        givenConfig(50_000.0, -1_000.0);
+        when(trades.sumPnlSinceForExchange(any(), eq("KRAKEN"))).thenReturn(0.0);
 
-        assertThat(riskService.check(100_000.0).allowed()).isFalse();
-        assertThat(riskService.check(100_000.0).reason()).contains("Position limit");
+        assertThat(riskService.check(Exchange.KRAKEN, 100_000.0).allowed()).isFalse();
+        assertThat(riskService.check(Exchange.KRAKEN, 100_000.0).reason()).contains("Position limit");
     }
 
     @Test
-    void usesDefaultPositionLimit_whenSettingMissing() {
-        when(settings.findById(eq("position_limit"))).thenReturn(Optional.empty());
-        when(settings.findById(eq("max_daily_loss"))).thenReturn(Optional.empty());
-        when(trades.sumPnlSince(any())).thenReturn(0.0);
+    void usesDefaultPositionLimit_whenConfigMissing() {
+        when(configRepo.findByExchange("KRAKEN")).thenReturn(Optional.empty());
+        when(trades.sumPnlSinceForExchange(any(), eq("KRAKEN"))).thenReturn(0.0);
 
         // default limit is 10_000
-        assertThat(riskService.check(9_000.0).allowed()).isTrue();
-        assertThat(riskService.check(11_000.0).allowed()).isFalse();
+        assertThat(riskService.check(Exchange.KRAKEN, 9_000.0).allowed()).isTrue();
+        assertThat(riskService.check(Exchange.KRAKEN, 11_000.0).allowed()).isFalse();
     }
 
     @Test
     void allows_whenOrderSizeEqualsPositionLimit() {
-        givenSetting("position_limit", 100_000.0);
-        when(trades.sumPnlSince(any())).thenReturn(0.0);
+        givenConfig(100_000.0, -1_000.0);
+        when(trades.sumPnlSinceForExchange(any(), eq("KRAKEN"))).thenReturn(0.0);
 
         // exactly at the limit — should pass (condition is strictly greater-than)
-        assertThat(riskService.check(100_000.0).allowed()).isTrue();
+        assertThat(riskService.check(Exchange.KRAKEN, 100_000.0).allowed()).isTrue();
     }
 
     // ── checkProfit ───────────────────────────────────────────────────────────
@@ -121,38 +123,34 @@ class RiskServiceTest {
 
     @Test
     void blocks_whenDailyLossReachesLimit() {
-        givenSetting("position_limit", 100_000.0);
-        givenSetting("max_daily_loss", -500.0);
-        when(trades.sumPnlSince(any())).thenReturn(-500.0);
+        givenConfig(100_000.0, -500.0);
+        when(trades.sumPnlSinceForExchange(any(), eq("KRAKEN"))).thenReturn(-500.0);
 
-        assertThat(riskService.check(1_000.0).allowed()).isFalse();
-        assertThat(riskService.check(1_000.0).reason()).contains("daily loss");
+        assertThat(riskService.check(Exchange.KRAKEN, 1_000.0).allowed()).isFalse();
+        assertThat(riskService.check(Exchange.KRAKEN, 1_000.0).reason()).contains("daily loss");
     }
 
     @Test
     void blocks_whenDailyLossExceedsLimit() {
-        givenSetting("position_limit", 100_000.0);
-        givenSetting("max_daily_loss", -500.0);
-        when(trades.sumPnlSince(any())).thenReturn(-750.0);
+        givenConfig(100_000.0, -500.0);
+        when(trades.sumPnlSinceForExchange(any(), eq("KRAKEN"))).thenReturn(-750.0);
 
-        assertThat(riskService.check(1_000.0).allowed()).isFalse();
+        assertThat(riskService.check(Exchange.KRAKEN, 1_000.0).allowed()).isFalse();
     }
 
     @Test
     void allows_whenDailyLossWithinLimit() {
-        givenSetting("position_limit", 100_000.0);
-        givenSetting("max_daily_loss", -500.0);
-        when(trades.sumPnlSince(any())).thenReturn(-499.0);
+        givenConfig(100_000.0, -500.0);
+        when(trades.sumPnlSinceForExchange(any(), eq("KRAKEN"))).thenReturn(-499.0);
 
-        assertThat(riskService.check(1_000.0).allowed()).isTrue();
+        assertThat(riskService.check(Exchange.KRAKEN, 1_000.0).allowed()).isTrue();
     }
 
     @Test
     void allows_whenNoPnlYetToday() {
-        givenSetting("position_limit", 100_000.0);
-        givenSetting("max_daily_loss", -500.0);
-        when(trades.sumPnlSince(any())).thenReturn(null);
+        givenConfig(100_000.0, -500.0);
+        when(trades.sumPnlSinceForExchange(any(), eq("KRAKEN"))).thenReturn(null);
 
-        assertThat(riskService.check(1_000.0).allowed()).isTrue();
+        assertThat(riskService.check(Exchange.KRAKEN, 1_000.0).allowed()).isTrue();
     }
 }
