@@ -62,6 +62,11 @@ export default function CcyRates() {
         loadExchanges();
     };
 
+    const toggleThinLiquidity = async (id: number) => {
+        await fetch(`/api/ccy/settings/markets/${id}/toggle-thin-liquidity`, { method: 'POST' });
+        loadExchanges();
+    };
+
     const statusColor = wsStatus === 'connected' ? '#00c853' : wsStatus === 'connecting' ? '#ffab00' : '#f44336';
     const statusLabel = wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Connecting…' : 'Disconnected';
 
@@ -92,6 +97,7 @@ export default function CcyRates() {
                 exchanges={exchanges}
                 onToggleExchange={toggleExchange}
                 onToggleMarket={toggleMarket}
+                onToggleThinLiquidity={toggleThinLiquidity}
             />
 
             <DebugDialog pair={selectedPair} onClose={() => setSelectedPair(null)} />

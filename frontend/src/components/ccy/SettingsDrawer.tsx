@@ -1,16 +1,17 @@
 import {
     Drawer, Box, Typography, Accordion, AccordionSummary,
-    AccordionDetails, List, ListItem, ListItemText, Switch, IconButton
+    AccordionDetails, List, ListItem, ListItemText, Switch, IconButton, Tooltip
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SettingsInputComponentIcon from '@mui/icons-material/SettingsInputComponent';
+import WaterDropIcon from '@mui/icons-material/WaterDrop';
 import { useState } from 'react';
 
 export interface CcyExchange {
     id: number;
     name: string;
     enabled: boolean;
-    markets: { id: number; coinPair: string; enabled: boolean }[];
+    markets: { id: number; coinPair: string; enabled: boolean; thinLiquidity: boolean }[];
 }
 
 interface SettingsDrawerProps {
@@ -19,9 +20,10 @@ interface SettingsDrawerProps {
     exchanges: CcyExchange[];
     onToggleExchange: (id: number) => void;
     onToggleMarket: (id: number) => void;
+    onToggleThinLiquidity: (id: number) => void;
 }
 
-export function SettingsDrawer({ open, onClose, exchanges, onToggleExchange, onToggleMarket }: SettingsDrawerProps) {
+export function SettingsDrawer({ open, onClose, exchanges, onToggleExchange, onToggleMarket, onToggleThinLiquidity }: SettingsDrawerProps) {
     const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
     return (
@@ -68,6 +70,18 @@ export function SettingsDrawer({ open, onClose, exchanges, onToggleExchange, onT
                                             primary={m.coinPair}
                                             primaryTypographyProps={{ fontSize: '0.9rem', color: ex.enabled ? '#fff' : '#555', fontWeight: 500 }}
                                         />
+                                        <Tooltip title="Thin / low-liquidity: ignore absurd price jumps for this pair instead of disabling it">
+                                            <span>
+                                                <IconButton
+                                                    size="small"
+                                                    disabled={!ex.enabled}
+                                                    onClick={() => onToggleThinLiquidity(m.id)}
+                                                    sx={{ color: m.thinLiquidity ? '#ffab00' : '#444' }}
+                                                >
+                                                    <WaterDropIcon fontSize="small" />
+                                                </IconButton>
+                                            </span>
+                                        </Tooltip>
                                         <Switch
                                             size="small"
                                             disabled={!ex.enabled}
