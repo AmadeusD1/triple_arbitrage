@@ -3,6 +3,20 @@ spring:
     hibernate:
       ddl-auto: validate
     show-sql: false
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${ALERT_EMAIL_FROM:}
+    password: ${ALERT_EMAIL_PASS:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
 
 arb:
   order-size-usd: 100000
