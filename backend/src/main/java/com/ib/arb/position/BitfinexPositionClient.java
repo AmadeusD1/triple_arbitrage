@@ -76,12 +76,15 @@ public class BitfinexPositionClient implements PositionClient {
                         balances.merge(currency, available, Double::sum);
                     }
                 }
-                if (!recognizedAny && !root.isEmpty()) {
+                // Positive confirmation the key/secret authenticated successfully in every case,
+                // including a genuinely empty "[]" (e.g. a brand-new account with no wallets ever
+                // created yet) - otherwise this call produces no log output at all and looks
+                // identical to never having run, or to a silent failure.
+                if (root.isEmpty()) {
+                    log.info("[BITFINEX] fetchBalances: authenticated OK, account has no wallets yet");
+                } else if (!recognizedAny) {
                     log.error("[BITFINEX] fetchBalances: unrecognized response shape: {}", rawBody);
-                } else if (recognizedAny) {
-                    // Positive confirmation the key/secret authenticated successfully, even when
-                    // every wallet is empty (e.g. a brand-new account) - otherwise this call
-                    // produces no log output at all and looks identical to never having run.
+                } else {
                     log.info("[BITFINEX] fetchBalances: authenticated OK, {} wallet(s), {} with positive balance",
                         root.size(), balances.size());
                 }

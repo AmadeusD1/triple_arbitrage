@@ -10,8 +10,10 @@ import org.springframework.stereotype.Component;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -38,8 +40,11 @@ public class BitfinexOrderBookFeed implements OrderBookFeed {
     private final Map<String, OrderBook> snapshots    = new ConcurrentHashMap<>();
     private volatile Runnable onUpdate = () -> {};
     private final Map<Integer, String>   chanToPair   = new ConcurrentHashMap<>(); // chanId → internal pair
-    private final Map<String, double[]>  bestBid      = new ConcurrentHashMap<>();
-    private final Map<String, double[]>  bestAsk      = new ConcurrentHashMap<>();
+    // bids: highest price first; asks: lowest price first - full depth-25 book per pair, not
+    // just the top level, so a removed top-of-book entry correctly falls back to the next-best
+    // price instead of leaving a stale/crossed value in place (see handleMessage).
+    private final Map<String, TreeMap<Double, Double>> bidBooks = new ConcurrentHashMap<>();
+    private final Map<String, TreeMap<Double, Double>> askBooks = new ConcurrentHashMap<>();
     private final AtomicInteger          subCount     = new AtomicInteger(0);
 
     private volatile boolean connected = false;
@@ -133,8 +138,8 @@ public class BitfinexOrderBookFeed implements OrderBookFeed {
 
     private void connect() {
         chanToPair.clear();
-        bestBid.clear();
-        bestAsk.clear();
+        bidBooks.clear();
+        askBooks.clear();
         subCount.set(0);
         try {
             httpClient.newWebSocketBuilder()
@@ -176,50 +181,58 @@ public class BitfinexOrderBookFeed implements OrderBookFeed {
             // Heartbeat
             if (second.isTextual() && "hb".equals(second.asText())) return;
 
-            // Snapshot: [[price, count, amount], ...]
+            // Snapshot: [[price, count, amount], ...] - full book replace
             if (second.isArray() && !second.isEmpty() && second.get(0).isArray()) {
-                double bid = 0, bidQty = 0, ask = 0, askQty = 0;
-                for (JsonNode entry : second) {
-                    var price  = entry.get(0).asDouble();
-                    var count  = entry.get(1).asInt();
-                    var amount = entry.get(2).asDouble();
-                    if (count > 0) {
-                        if (amount > 0 && (bid == 0 || price > bid)) { bid = price; bidQty = amount; }
-                        if (amount < 0 && (ask == 0 || price < ask)) { ask = price; askQty = -amount; }
-                    }
-                }
-                if (bid > 0) bestBid.put(pair, new double[]{bid, bidQty});
-                if (ask > 0) bestAsk.put(pair, new double[]{ask, askQty});
+                var bidBook = new TreeMap<Double, Double>(Comparator.reverseOrder());
+                var askBook = new TreeMap<Double, Double>();
+                for (JsonNode entry : second) applyLevel(entry, bidBook, askBook);
+                bidBooks.put(pair, bidBook);
+                askBooks.put(pair, askBook);
                 publishIfReady(pair);
                 return;
             }
 
-            // Update: [price, count, amount]
+            // Update: [price, count, amount] - single-level upsert/remove against the
+            // existing book, never a blind "only move one way" overwrite (that ratchets
+            // the tracked spread until it crosses and gets stuck).
             if (second.isArray() && second.size() == 3) {
-                var price  = second.get(0).asDouble();
-                var count  = second.get(1).asInt();
-                var amount = second.get(2).asDouble();
-                if (count > 0) {
-                    if (amount > 0) {
-                        var cur = bestBid.get(pair);
-                        if (cur == null || price >= cur[0]) bestBid.put(pair, new double[]{price, amount});
-                    } else if (amount < 0) {
-                        var cur = bestAsk.get(pair);
-                        if (cur == null || price <= cur[0]) bestAsk.put(pair, new double[]{price, -amount});
-                    }
-                }
+                var bidBook = bidBooks.computeIfAbsent(pair, k -> new TreeMap<>(Comparator.reverseOrder()));
+                var askBook = askBooks.computeIfAbsent(pair, k -> new TreeMap<>());
+                applyLevel(second, bidBook, askBook);
                 publishIfReady(pair);
             }
         } catch (Exception ignored) {}
     }
 
+    /**
+     * Applies one Bitfinex book level [price, count, amount] to the relevant side's book:
+     * count == 0 removes that price level, count > 0 upserts it. amount's sign selects the
+     * side (positive = bid, negative = ask) and its magnitude is the quantity.
+     */
+    private void applyLevel(JsonNode level, TreeMap<Double, Double> bidBook, TreeMap<Double, Double> askBook) {
+        var price  = level.get(0).asDouble();
+        var count  = level.get(1).asInt();
+        var amount = level.get(2).asDouble();
+        if (price <= 0) return;
+        var book = amount >= 0 ? bidBook : askBook;
+        if (count == 0) book.remove(price);
+        else book.put(price, Math.abs(amount));
+    }
+
     private void publishIfReady(String pair) {
-        var bid = bestBid.get(pair);
-        var ask = bestAsk.get(pair);
-        if (bid != null && ask != null && bid[0] > 0 && ask[0] > 0) {
-            snapshots.put(pair, new OrderBook(pair, bid[0], bid[1], ask[0], ask[1]));
+        var bidBook = bidBooks.get(pair);
+        var askBook = askBooks.get(pair);
+        if (bidBook == null || askBook == null) return;
+        var bestBid = bidBook.firstEntry();
+        var bestAsk = askBook.firstEntry();
+        if (bestBid == null || bestAsk == null) return;
+
+        var ob = new OrderBook(pair, bestBid.getKey(), bestBid.getValue(), bestAsk.getKey(), bestAsk.getValue());
+        if (ob.isValid()) {
+            snapshots.put(pair, ob);
             onUpdate.run();
         }
+        // crossed/invalid books are transient during fast updates - keep the last valid snapshot
     }
 
     private String buildSubscribe(String pair) {
@@ -230,7 +243,7 @@ public class BitfinexOrderBookFeed implements OrderBookFeed {
                 .put("symbol",  toBfxSymbol(pair))
                 .put("prec",    "P0")
                 .put("freq",    "F0")
-                .put("len",     "1");
+                .put("len",     "25");
             return mapper.writeValueAsString(msg);
         } catch (Exception e) { return "{}"; }
     }
