@@ -30,6 +30,7 @@ import com.ib.arb.scanner.Cycle;
 import com.ib.arb.scanner.Signal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -43,6 +44,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.DoubleAdder;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.DoubleStream;
@@ -63,6 +65,11 @@ public class AutoTrader {
     private final CurrencyRateFeed currencyRateFeed;
     private final MissedOpportunityRepository missedOpportunityRepo;
     private final ExchangeConfigRepository configRepo;
+    // ObjectProvider, not a direct ExchangeManager, deliberately: ExchangeManager's own
+    // constructor depends on AutoTrader, so a constructor-eager field here would be a direct
+    // two-way circular dependency between just these two beans. ObjectProvider defers the
+    // lookup until actually used below, by which point both beans are already constructed.
+    private final ObjectProvider<ExchangeManager> exchangeManagerProvider;
 
     @Value("${arb.max-open-orders}")
     private int maxOpenOrders;
@@ -72,11 +79,15 @@ public class AutoTrader {
 
     // Per-exchange isolated state
     private final Map<Exchange, AtomicLong>   lastTradeCompletedMap = new ConcurrentHashMap<>();
+    // true from the moment a real (non-simulation) trade's legs are placed until its
+    // post-trade balance refresh actually lands - see finalizeExecution. Both attemptArbitrage
+    // and executeTrade refuse to start a new real trade on an exchange while this is true, so
+    // a second trade can never be validated against stale, pre-settlement balance data.
     private final Map<Exchange, AtomicBoolean> executingMap         = new ConcurrentHashMap<>();
     private final Map<Exchange, AtomicLong>   detectedMap          = new ConcurrentHashMap<>();
     private final Map<Exchange, AtomicLong>   executedMap          = new ConcurrentHashMap<>();
     private final Map<Exchange, AtomicLong>   missedMap            = new ConcurrentHashMap<>();
-    private final Map<Exchange, AtomicLong>   totalEdgeBitsMap     = new ConcurrentHashMap<>();
+    private final Map<Exchange, DoubleAdder>  totalEdgeMap         = new ConcurrentHashMap<>();
 
     /** Per-exchange critical alerts (e.g. precision-error rejections) — set when live order
      *  placement is halted, surfaced to the Dashboard, cleared on restart. */
@@ -87,7 +98,8 @@ public class AutoTrader {
                       TradeRepository tradeRepo, AlertService alerts,
                       TriangleConfigRepository triangleConfigRepo, CurrencyRateFeed currencyRateFeed,
                       MissedOpportunityRepository missedOpportunityRepo,
-                      ExchangeConfigRepository configRepo) {
+                      ExchangeConfigRepository configRepo,
+                      ObjectProvider<ExchangeManager> exchangeManagerProvider) {
         this.arbitrageEngine  = arbitrageEngine;
         this.positions        = positions;
         this.risk             = risk;
@@ -99,6 +111,7 @@ public class AutoTrader {
         this.currencyRateFeed = currencyRateFeed;
         this.missedOpportunityRepo = missedOpportunityRepo;
         this.configRepo       = configRepo;
+        this.exchangeManagerProvider = exchangeManagerProvider;
     }
 
     // ── Automated path ────────────────────────────────────────────────────────
@@ -107,6 +120,10 @@ public class AutoTrader {
         var broker = orderClients.get(exchange);
         if (broker == null) {
             log.warn("[ARB] No OrderClient registered for {}", exchange);
+            return;
+        }
+        if (executing(exchange).get()) {
+            log.debug("[ARB] {} — skipping, previous real trade still settling", exchange);
             return;
         }
         if (broker.openOrderCount() >= maxOpenOrders) {
@@ -129,7 +146,7 @@ public class AutoTrader {
 
     private void executeArbitrage(Signal s, OrderClient broker) {
         counter(detectedMap, s.exchange()).incrementAndGet();
-        totalEdgeBits(s.exchange()).addAndGet(Double.doubleToLongBits(s.profit()));
+        totalEdge(s.exchange()).add(s.profit());
 
         var maxVolume  = calculateMaxVolume(s);
         maxVolume = Math.min(effectiveOrderSize(s.exchange()), maxVolume);
@@ -167,10 +184,14 @@ public class AutoTrader {
         } else {
             legResults = broker.placeOrderLegs(legs);
             reportIfHaltingError(s.exchange(), broker);
+            haltExchangeOnRejectedLeg(s.exchange(), legResults);
         }
         var latencyMs = System.currentTimeMillis() - start;
         var filled = !legResults.isEmpty() && legResults.stream().allMatch(LegResult::filled);
-        finalizeExecution(s, broker, legResults, latencyMs, filled ? expectedPnl : 0, filled, "ARB", true, maxVolume, expectedPnl, quoteRates);
+        // Alert only on real fills - simulation trades happen dozens of times a day and would
+        // otherwise flood the inbox with routine, no-op noise.
+        finalizeExecution(s, broker, legResults, latencyMs, filled ? expectedPnl : 0, filled, "ARB",
+            !broker.isSimulation(), maxVolume, expectedPnl, quoteRates);
     }
 
     // ── Manual path ───────────────────────────────────────────────────────────
@@ -180,6 +201,13 @@ public class AutoTrader {
         var broker = orderClients.get(exchange);
         if (broker == null)
             return new ManualTradeResult(-1, "REJECTED_NO_CLIENT", 0.0);
+
+        // Manual trades deliberately bypass the auto-scan cooldown (see
+        // manualTrade_bypassesCooldown), but they still must not act on stale balance data -
+        // this gate (unlike the cooldown) blocks until the *previous real trade's* balance
+        // refresh has actually landed, not just until a fixed timer elapses.
+        if (executing(exchange).get())
+            return new ManualTradeResult(-1, "REJECTED_SETTLING", 0.0);
 
         if (broker.openOrderCount() >= maxOpenOrders)
             return new ManualTradeResult(-1, "REJECTED_OPEN_ORDERS", 0.0);
@@ -205,6 +233,7 @@ public class AutoTrader {
         } else {
             legResults = broker.placeOrderLegs(legs);
             reportIfHaltingError(exchange, broker);
+            haltExchangeOnRejectedLeg(exchange, legResults);
         }
         var latencyMs = System.currentTimeMillis() - start;
 
@@ -244,19 +273,25 @@ public class AutoTrader {
             String logPrefix, boolean sendAlert, double orderSize, double expectedPnl,
             List<Double> quoteRates) {
         lastTradeTime(signal.exchange()).set(System.currentTimeMillis());
-        executing(signal.exchange()).set(false);
 
         var trade = buildTrade(signal, broker, legResults, latencyMs, estimatedPnl, filled, orderSize, expectedPnl, quoteRates);
         tradeRepo.save(trade);
-        // Simulation trades need no position refresh; real trades wait 2s for order settlement
-        if (!broker.isSimulation()) positions.refreshBalancesDelayed(signal.exchange(), 2000);
+        // Simulation trades need no position refresh. Real trades: hold the "still settling"
+        // gate (see attemptArbitrage/executeTrade) up until the delayed balance refresh has
+        // actually landed - otherwise a second real trade fired in the 2s settlement window
+        // would be validated against the pre-trade balance instead of the post-trade one.
+        if (!broker.isSimulation()) {
+            executing(signal.exchange()).set(true);
+            positions.refreshBalancesDelayed(signal.exchange(), 2000,
+                () -> executing(signal.exchange()).set(false));
+        }
 
         if (filled) {
             counter(executedMap, signal.exchange()).incrementAndGet();
             triangleConfigRepo.incrementStats(signal.config().getId(), estimatedPnl);
             arbitrageEngine.invalidateSnapshots(signal.exchange(),
                 signal.config().getPair1(), signal.config().getPair2(), signal.config().getPair3());
-            if (sendAlert) alerts.tradeFilled(signal, estimatedPnl);
+            if (sendAlert) alerts.tradeFilled(trade);
             log.info("[{}] {} trade filled — tradeId={} pnl={} latencyMs={}",
                 logPrefix, signal.exchange(), trade.getId(), String.format("%.2f", estimatedPnl), latencyMs);
         } else {
@@ -402,8 +437,8 @@ public class AutoTrader {
         long det  = detectedMap.values().stream().mapToLong(AtomicLong::get).sum();
         long exe  = executedMap.values().stream().mapToLong(AtomicLong::get).sum();
         long mis  = missedMap.values().stream().mapToLong(AtomicLong::get).sum();
-        double te = totalEdgeBitsMap.values().stream()
-            .mapToDouble(l -> Double.longBitsToDouble(l.get())).sum();
+        double te = totalEdgeMap.values().stream()
+            .mapToDouble(DoubleAdder::sum).sum();
         return new ArbitrageStats(det, exe, mis, det > 0 ? te / det : 0.0);
     }
 
@@ -420,6 +455,40 @@ public class AutoTrader {
             exchangeAlerts.put(exchange, err);
             log.error("[ARB] {} — halting trading: {}", exchange, err);
         });
+    }
+
+    /**
+     * If a real order attempt left any leg unfilled - for any reason the exchange gives
+     * (insufficient funds, a precision/decimal rejection, minimum order size, etc.) - a
+     * failed leg on a live triangular order means the other leg(s) may have already filled,
+     * leaving an unhedged position. Halt trading on that exchange immediately and persist it
+     * as disabled in Exchange Settings (not just an in-memory scan-loop pause) so it stays
+     * off across restarts until a human reviews it and re-enables it, then send an alert.
+     */
+    private void haltExchangeOnRejectedLeg(Exchange exchange, List<LegResult> legResults) {
+        var rejected = legResults.stream().filter(l -> !l.filled()).toList();
+        if (rejected.isEmpty())
+            return;
+
+        var reason = rejected.stream()
+            .map(l -> "Leg %d (%s %s): %s".formatted(l.legIndex(), l.direction(), l.pair(),
+                l.rejectionReason() != null ? l.rejectionReason() : "rejected, no reason given"))
+            .reduce((a, b) -> a + "; " + b).orElse("rejected");
+
+        exchangeAlerts.put(exchange, reason);
+
+        var cfg = configRepo.findByExchange(exchange.name()).orElse(null);
+        if (cfg == null || !cfg.isEnabled()) {
+            log.debug("[ARB] {} already disabled - leg rejection reason: {}", exchange, reason);
+            return;
+        }
+
+        log.error("[ARB] {} — halting trading, disabling in Exchange Settings. Reason: {}", exchange, reason);
+        cfg.setEnabled(false);
+        configRepo.save(cfg);
+        try { exchangeManagerProvider.getObject().deactivateExchange(exchange); } catch (Exception ignored) {}
+
+        alerts.exchangeDisabledForRejectedOrder(exchange.name(), reason);
     }
 
     public Optional<String> getExchangeAlert(Exchange exchange) {
@@ -441,8 +510,8 @@ public class AutoTrader {
     private AtomicLong counter(Map<Exchange, AtomicLong> map, Exchange e) {
         return map.computeIfAbsent(e, x -> new AtomicLong(0));
     }
-    private AtomicLong totalEdgeBits(Exchange e) {
-        return totalEdgeBitsMap.computeIfAbsent(e, x -> new AtomicLong(0));
+    private DoubleAdder totalEdge(Exchange e) {
+        return totalEdgeMap.computeIfAbsent(e, x -> new DoubleAdder());
     }
     private double effectiveOrderSize(Exchange e) {
         return configRepo.findByExchange(e.name())

@@ -168,12 +168,52 @@ public class CurrencyRateFeed {
 
     private record PriceEntry(double price, boolean calculated) {}
 
+    // Final backstop before a rate is trusted for PnL/trade calculations, independent of
+    // whatever outlier protection crypto-aggregator itself applies - protects against any
+    // failure mode between here and there (a ccy-agg bug, network corruption, a future
+    // integration mistake), not just a single bad exchange.
+    private static final double MAX_TICK_DEVIATION = 0.10; // +/-10%, per update
+    private static final int RESYNC_AFTER_CONSECUTIVE_REJECTS = 3;
+    private final Map<String, Integer> consecutiveRejects = new ConcurrentHashMap<>();
+
     private void handleMessage(String json) {
         try {
             var update = mapper.readValue(json, new TypeReference<Map<String, PriceEntry>>() {});
-            update.forEach((pair, entry) -> rates.put(pair, entry.price()));
+            update.forEach(this::applyRate);
         } catch (Exception e) {
             log.debug("[FX] Failed to parse message: {}", e.getMessage());
         }
+    }
+
+    private void applyRate(String pair, PriceEntry entry) {
+        var price = entry.price();
+        var previous = rates.get(pair);
+        if (previous == null || previous <= 0) {
+            rates.put(pair, price);
+            return;
+        }
+
+        var ratio = price / previous;
+        if (ratio >= (1 - MAX_TICK_DEVIATION) && ratio <= (1 + MAX_TICK_DEVIATION)) {
+            rates.put(pair, price);
+            consecutiveRejects.remove(pair);
+            return;
+        }
+
+        // A single rejection could be a real sudden repricing (e.g. crypto-aggregator's own
+        // outlier check just resynced after a genuine large move), not bad data - after enough
+        // consecutive rejections confirming the same new level, accept it rather than freezing
+        // this pair's rate forever.
+        var rejects = consecutiveRejects.merge(pair, 1, Integer::sum);
+        if (rejects >= RESYNC_AFTER_CONSECUTIVE_REJECTS) {
+            log.warn("[FX] {} confirmed at {} after {} consecutive rejections (was {}) — accepting as a real repricing",
+                pair, price, rejects, previous);
+            rates.put(pair, price);
+            consecutiveRejects.remove(pair);
+            return;
+        }
+
+        log.error("[FX] Rejected implausible rate update for {}: {} is {}x the previous rate {} — keeping previous rate.",
+            pair, price, String.format("%.2f", ratio), previous);
     }
 }

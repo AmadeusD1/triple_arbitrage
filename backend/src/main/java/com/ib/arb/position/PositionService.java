@@ -42,10 +42,17 @@ public class PositionService {
 
     /** Called once at startup to warm the balance cache for all enabled exchanges. */
     public void startupRefresh() {
+        log.info("[Position] startupRefresh: {} PositionClient bean(s) injected: {}",
+            clients.size(), clients.stream().map(c -> c.getExchange().name()).toList());
         clients.stream()
             .filter(c -> {
                 var cfg = exchangeConfigRepo.findByExchange(c.getExchange().name()).orElse(null);
-                return cfg != null && cfg.isEnabled();
+                var eligible = cfg != null && cfg.isEnabled();
+                if (!eligible) {
+                    log.info("[Position] Skipping startup balance refresh for {} (cfg={}, enabled={})",
+                        c.getExchange(), cfg != null, cfg != null && cfg.isEnabled());
+                }
+                return eligible;
             })
             .forEach(c -> refreshBalances(c.getExchange()));
     }
@@ -73,13 +80,31 @@ public class PositionService {
                 if (!fetched.isEmpty()) {
                     balanceCache.put(exchange, fetched);
                     log.info("[Position] Refreshed {} ({} entries)", exchange, fetched.size());
+                } else {
+                    // Deliberately does NOT overwrite balanceCache - an empty fetch could mean a
+                    // genuinely zero-balance account, or a transient hiccup, and we don't want a
+                    // blip to wipe out a previously-known-good balance. This log line alone
+                    // confirms the refresh attempt actually ran, since otherwise a zero-balance
+                    // exchange produces no output at all and looks identical to never having run.
+                    log.info("[Position] Refreshed {} (0 entries - empty or unavailable)", exchange);
                 }
             });
     }
 
-    /** Schedules a balance refresh after {@code delayMs} ms — used post-trade for settlement. */
-    public void refreshBalancesDelayed(Exchange exchange, long delayMs) {
-        refreshScheduler.schedule(() -> refreshBalances(exchange), delayMs, TimeUnit.MILLISECONDS);
+    /**
+     * Schedules a balance refresh after {@code delayMs} ms - used post-trade for settlement.
+     * {@code onComplete} runs after the refresh finishes (success or failure), letting the
+     * caller know the cache now reflects the trade rather than guessing based on the delay
+     * alone - see {@code AutoTrader}'s per-exchange "still settling" gate.
+     */
+    public void refreshBalancesDelayed(Exchange exchange, long delayMs, Runnable onComplete) {
+        refreshScheduler.schedule(() -> {
+            try {
+                refreshBalances(exchange);
+            } finally {
+                onComplete.run();
+            }
+        }, delayMs, TimeUnit.MILLISECONDS);
     }
 
     public List<BalanceEntry> getBalances(Exchange exchange) {

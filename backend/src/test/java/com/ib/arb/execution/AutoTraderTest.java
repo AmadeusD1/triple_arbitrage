@@ -1,32 +1,37 @@
 package com.ib.arb.execution;
 
 import com.ib.arb.alert.AlertService;
-import com.ib.arb.broker.KrakenOrderClient;
-import com.ib.arb.broker.KrakenOrderClient.LegResult;
+import com.ib.arb.broker.LegResult;
+import com.ib.arb.broker.OrderClient;
 import com.ib.arb.broker.OrderLeg;
 import com.ib.arb.marketdata.Exchange;
 import com.ib.arb.marketdata.CurrencyRateFeed;
 import com.ib.arb.marketdata.OrderBook;
 import com.ib.arb.marketdata.PriceSnapshot;
+import com.ib.arb.model.ExchangeConfig;
 import com.ib.arb.model.Trade;
 import com.ib.arb.model.TriangleConfig;
 import com.ib.arb.position.PositionService;
+import com.ib.arb.repository.ExchangeConfigRepository;
 import com.ib.arb.repository.MissedOpportunityRepository;
 import com.ib.arb.repository.TradeRepository;
 import com.ib.arb.repository.TriangleConfigRepository;
 import com.ib.arb.risk.RiskService;
 import com.ib.arb.engine.AutoTrader;
 import com.ib.arb.engine.ArbitrageEngine;
+import com.ib.arb.engine.ExchangeManager;
 import com.ib.arb.scanner.Cycle;
 import com.ib.arb.scanner.Signal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.data.Offset.offset;
@@ -38,12 +43,16 @@ class AutoTraderTest {
     ArbitrageEngine arbitrageEngine                      = mock(ArbitrageEngine.class);
     PositionService positions                            = mock(PositionService.class);
     RiskService risk                                     = mock(RiskService.class);
-    KrakenOrderClient broker                             = mock(KrakenOrderClient.class);
+    OrderClient broker                                   = mock(OrderClient.class);
     TradeRepository tradeRepo                            = mock(TradeRepository.class);
     AlertService alerts                                  = mock(AlertService.class);
     TriangleConfigRepository triangleRepo                = mock(TriangleConfigRepository.class);
     CurrencyRateFeed currencyRateFeed                    = mock(CurrencyRateFeed.class);
     MissedOpportunityRepository missedOpportunityRepo    = mock(MissedOpportunityRepository.class);
+    ExchangeConfigRepository configRepo                  = mock(ExchangeConfigRepository.class);
+    ExchangeManager exchangeManager                      = mock(ExchangeManager.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<ExchangeManager> exchangeManagerProvider = mock(ObjectProvider.class);
 
     AutoTrader autoTrader;
 
@@ -62,24 +71,30 @@ class AutoTraderTest {
 
     // EURJPY sell at 162.25 > ask_EURUSD*ask_USDJPY ≈ 162.021 → profitable execution
     static final List<LegResult> THREE_FILLED_LEGS = List.of(
-        new LegResult(1, "EURUSD", "BUY",  1.0801, 92584.0, true,  "TXID-1"),
-        new LegResult(2, "USDJPY", "BUY",  150.01, 617.2,   true,  "TXID-2"),
-        new LegResult(3, "EURJPY", "SELL", 162.25, 617.2,   true,  "TXID-3")
+        new LegResult(1, "EURUSD", "BUY",  1.0801, 92584.0, true,  "TXID-1", null),
+        new LegResult(2, "USDJPY", "BUY",  150.01, 617.2,   true,  "TXID-2", null),
+        new LegResult(3, "EURJPY", "SELL", 162.25, 617.2,   true,  "TXID-3", null)
     );
 
     static final List<LegResult> ONE_FAILED_LEG = List.of(
-        new LegResult(1, "EURUSD", "BUY",  1.0801, 92584.0, true,  "TXID-1"),
-        new LegResult(2, "USDJPY", "BUY",  150.01, 666.6,   false, null)
+        new LegResult(1, "EURUSD", "BUY",  1.0801, 92584.0, true,  "TXID-1", null),
+        new LegResult(2, "USDJPY", "BUY",  150.01, 666.6,   false, null,     "Insufficient funds")
     );
 
     @BeforeEach
     void setup() {
-        autoTrader = new AutoTrader(arbitrageEngine, positions, risk, broker,
+        when(broker.getExchange()).thenReturn(Exchange.KRAKEN);
+        // Simulation-mode trades round through this; an unstubbed int[] mock return is empty
+        // and would blow up with an ArrayIndexOutOfBoundsException on prec[0]/prec[1].
+        when(broker.getPrecision(anyString())).thenReturn(new int[]{8, 8});
+
+        autoTrader = new AutoTrader(arbitrageEngine, positions, risk, List.of(broker),
                                     tradeRepo, alerts, triangleRepo, currencyRateFeed,
-                                    missedOpportunityRepo);
+                                    missedOpportunityRepo, configRepo, exchangeManagerProvider);
+        when(exchangeManagerProvider.getObject()).thenReturn(exchangeManager);
+
         when(currencyRateFeed.getAllRates()).thenReturn(Map.of());
         when(currencyRateFeed.getRate(anyString())).thenReturn(1.0);
-        ReflectionTestUtils.setField(autoTrader, "orderSizeUsd", 100_000.0);
         ReflectionTestUtils.setField(autoTrader, "maxOpenOrders", 1);
         ReflectionTestUtils.setField(autoTrader, "tradeCooldownMs", 0L);
 
@@ -100,23 +115,30 @@ class AutoTraderTest {
         });
     }
 
+    /** Sets the per-exchange last-completed-trade timestamp used by the cooldown gate. */
+    @SuppressWarnings("unchecked")
+    private void setLastTradeTime(Exchange exchange, long millis) {
+        var map = (Map<Exchange, AtomicLong>) ReflectionTestUtils.getField(autoTrader, "lastTradeCompletedMap");
+        map.computeIfAbsent(exchange, e -> new AtomicLong()).set(millis);
+    }
+
     // ── early exits ───────────────────────────────────────────────────────────
 
     @Test
     void skips_whenTooManyOpenOrders() {
         when(broker.openOrderCount()).thenReturn(1);
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
-        verify(arbitrageEngine, never()).scanForOpportunities();
+        verify(arbitrageEngine, never()).scanForOpportunities(any());
     }
 
     @Test
     void skips_whenNoSignal() {
         when(broker.openOrderCount()).thenReturn(0);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.empty());
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.empty());
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
         verify(positions, never()).hasAvailableBalance(any(), any(), anyDouble());
     }
@@ -124,26 +146,26 @@ class AutoTraderTest {
     @Test
     void incrementsMissed_whenBalanceInsufficient() {
         when(broker.openOrderCount()).thenReturn(0);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(false);
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
         assertThat(autoTrader.getStats().missed()).isEqualTo(1);
-        verify(risk, never()).check(anyDouble());
+        verify(risk, never()).check(any(), anyDouble());
     }
 
     @Test
     void incrementsMissed_whenRiskBlocked() {
         when(broker.openOrderCount()).thenReturn(0);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.block("limit"));
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.block("limit"));
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
         assertThat(autoTrader.getStats().missed()).isEqualTo(1);
-        verify(broker, never()).placeOrder(any(), anyDouble());
+        verify(broker, never()).placeOrderLegs(any());
     }
 
     // ── simulation mode ───────────────────────────────────────────────────────
@@ -152,14 +174,13 @@ class AutoTraderTest {
     void simulation_recordsFill_withoutCallingBroker() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
-        when(broker.computeLegs(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
-        verify(broker, never()).placeOrder(any(), anyDouble());
+        verify(broker, never()).placeOrderLegs(any());
         var captor = ArgumentCaptor.forClass(Trade.class);
         verify(tradeRepo).save(captor.capture());
         var saved = captor.getValue();
@@ -168,6 +189,9 @@ class AutoTraderTest {
         assertThat(saved.getLegs()).allMatch(l -> "SIMULATED".equals(l.getStatus()));
         assertThat(autoTrader.getStats().executed()).isEqualTo(1);
         verify(triangleRepo).incrementStats(any(), anyDouble());
+        // Simulation trades happen dozens of times a day - alerting on every one would flood
+        // the inbox with routine noise, so only real fills should ever reach AlertService.
+        verify(alerts, never()).tradeFilled(any());
     }
 
     // ── live mode ─────────────────────────────────────────────────────────────
@@ -177,11 +201,11 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeOrderLegs(any())).thenReturn(THREE_FILLED_LEGS);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
         var captor = ArgumentCaptor.forClass(Trade.class);
         verify(tradeRepo).save(captor.capture());
@@ -193,8 +217,11 @@ class AutoTraderTest {
         assertThat(saved.getLegs().get(0).getPair()).isEqualTo("EURUSD");
         assertThat(saved.getLegs().get(0).getDirection()).isEqualTo("BUY");
         assertThat(autoTrader.getStats().executed()).isEqualTo(1);
-        verify(alerts).tradeFilled(eq(SIGNAL_A), anyDouble());
+        verify(alerts).tradeFilled(saved);
         verify(triangleRepo).incrementStats(any(), anyDouble());
+        // A clean fill must never trip the leg-rejection halt.
+        verify(configRepo, never()).save(any());
+        verify(alerts, never()).exchangeDisabledForRejectedOrder(any(), any());
     }
 
     @Test
@@ -202,11 +229,11 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeOrderLegs(any())).thenReturn(ONE_FAILED_LEG);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
         var captor = ArgumentCaptor.forClass(Trade.class);
         verify(tradeRepo).save(captor.capture());
@@ -224,11 +251,11 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeOrderLegs(any())).thenReturn(List.of());
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
         var captor = ArgumentCaptor.forClass(Trade.class);
         verify(tradeRepo).save(captor.capture());
@@ -241,13 +268,119 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeOrderLegs(any())).thenReturn(ONE_FAILED_LEG);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
         verify(triangleRepo, never()).incrementStats(any(), anyDouble());
+    }
+
+    // ── settlement gate (real trades) ─────────────────────────────────────────
+
+    /** Captures the completion callback passed to the most recent refreshBalancesDelayed call. */
+    private Runnable captureSettlementCallback() {
+        var captor = ArgumentCaptor.forClass(Runnable.class);
+        verify(positions).refreshBalancesDelayed(eq(Exchange.KRAKEN), eq(2000L), captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    void liveTrade_blocksNextAutoAttempt_untilSettlementCallbackFires() {
+        when(broker.openOrderCount()).thenReturn(0);
+        when(broker.isSimulation()).thenReturn(false);
+        when(broker.placeOrderLegs(any())).thenReturn(THREE_FILLED_LEGS);
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
+        when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
+
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
+        var onSettled = captureSettlementCallback();
+
+        // Balance refresh hasn't landed yet - a second scan must not even look for a signal.
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
+        verify(arbitrageEngine, times(1)).scanForOpportunities(any());
+
+        // Once settlement actually lands, the gate releases.
+        onSettled.run();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
+        verify(arbitrageEngine, times(2)).scanForOpportunities(any());
+    }
+
+    @Test
+    void liveTrade_blocksManualRetrade_untilSettlementCallbackFires() {
+        when(broker.openOrderCount()).thenReturn(0);
+        when(broker.isSimulation()).thenReturn(false);
+        when(broker.placeOrderLegs(any())).thenReturn(THREE_FILLED_LEGS);
+        when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
+
+        var first = autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
+        assertThat(first.status()).isEqualTo("FILLED");
+        var onSettled = captureSettlementCallback();
+
+        var blocked = autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
+        assertThat(blocked.status()).isEqualTo("REJECTED_SETTLING");
+        verify(broker, times(1)).placeOrderLegs(any()); // the blocked attempt never placed an order
+
+        onSettled.run();
+        var allowed = autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
+        assertThat(allowed.status()).isEqualTo("FILLED");
+    }
+
+    @Test
+    void simulationTrade_neverEngagesSettlementGate() {
+        when(broker.openOrderCount()).thenReturn(0);
+        when(broker.isSimulation()).thenReturn(true);
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
+        when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
+
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
+
+        verify(positions, never()).refreshBalancesDelayed(any(), anyLong(), any());
+        verify(arbitrageEngine, times(2)).scanForOpportunities(any());
+    }
+
+    // ── leg-rejection halt (insufficient funds, precision, etc.) ─────────────
+
+    @Test
+    void liveOrder_disablesExchangeAndAlerts_whenLegRejected() {
+        var cfg = new ExchangeConfig().setExchange("KRAKEN").setEnabled(true);
+        when(configRepo.findByExchange("KRAKEN")).thenReturn(Optional.of(cfg));
+        when(broker.openOrderCount()).thenReturn(0);
+        when(broker.isSimulation()).thenReturn(false);
+        when(broker.placeOrderLegs(any())).thenReturn(ONE_FAILED_LEG);
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
+        when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
+
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
+
+        assertThat(cfg.isEnabled()).isFalse();
+        verify(configRepo).save(cfg);
+        verify(exchangeManager).deactivateExchange(Exchange.KRAKEN);
+        verify(alerts).exchangeDisabledForRejectedOrder(eq("KRAKEN"), contains("Insufficient funds"));
+    }
+
+    @Test
+    void liveOrder_doesNotReDisable_whenExchangeAlreadyDisabled() {
+        var cfg = new ExchangeConfig().setExchange("KRAKEN").setEnabled(false);
+        when(configRepo.findByExchange("KRAKEN")).thenReturn(Optional.of(cfg));
+        when(broker.openOrderCount()).thenReturn(0);
+        when(broker.isSimulation()).thenReturn(false);
+        when(broker.placeOrderLegs(any())).thenReturn(ONE_FAILED_LEG);
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
+        when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
+
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
+
+        verify(configRepo, never()).save(any());
+        verify(exchangeManager, never()).deactivateExchange(any());
+        verify(alerts, never()).exchangeDisabledForRejectedOrder(any(), any());
     }
 
     // ── stats ─────────────────────────────────────────────────────────────────
@@ -257,15 +390,14 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
-        when(broker.computeLegs(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         var sig1 = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.001, OB, OB, OB);
         var sig2 = new Signal(Exchange.KRAKEN, TRI, Cycle.BBS, 0.003, OB, OB, OB);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(sig1), Optional.of(sig2));
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(sig1), Optional.of(sig2));
 
-        autoTrader.attemptArbitrage();
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
         var stats = autoTrader.getStats();
         assertThat(stats.detected()).isEqualTo(2);
@@ -283,38 +415,40 @@ class AutoTraderTest {
     void cycleA_checksQuoteCurrency() {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
-        when(broker.computeLegs(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(SIGNAL_A));
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(SIGNAL_A));
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
+        // Cycle A (BBS) leg1 = BUY EURUSD → spent currency = quote = USD
         verify(positions).hasAvailableBalance(Exchange.KRAKEN, "USD", 100_000.0);
     }
 
     @Test
     void cycleB_checksBaseCurrency() {
-        var signalB = new Signal(Exchange.KRAKEN, TRI, Cycle.BSS, 0.001, OB, OB, OB);
+        // Only SBS has leg1 = SELL (BBS/BSS/BSB all start with BUY) — that's what exercises
+        // the base-currency branch of hasBalanceForAllLegs.
+        var signalB = new Signal(Exchange.KRAKEN, TRI, Cycle.SBS, 0.001, OB, OB, OB);
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
-        when(broker.computeLegs(any(), anyDouble())).thenReturn(THREE_FILLED_LEGS);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(signalB));
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(signalB));
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
-        // Cycle B leg1 = SELL EURUSD → ccy=EUR, required = orderSizeUsd / bid_EURUSD
-        verify(positions).hasAvailableBalance(eq(Exchange.KRAKEN), eq("EUR"), anyDouble());
+        // Cycle SBS leg1 = SELL EURUSD → spent currency = base = EUR (leg3, SELL EURJPY, is
+        // also EUR-denominated, so this fires for both legs — atLeastOnce, not exactly once)
+        verify(positions, atLeastOnce()).hasAvailableBalance(eq(Exchange.KRAKEN), eq("EUR"), anyDouble());
     }
 
     // ── executeTrade (manual) — early rejections ──────────────────────────────
 
     static final List<OrderLeg> MANUAL_LEGS = List.of(
-        new OrderLeg(1, "EURUSD", "BUY",  1.0801, 10_000.0),
-        new OrderLeg(2, "USDJPY", "BUY",  150.01,    72.0),
-        new OrderLeg(3, "EURJPY", "SELL", 162.00,    67.0)
+        new OrderLeg(1, "EURUSD", "BUY",  1.0801, 10_000.0, "LIMIT"),
+        new OrderLeg(2, "USDJPY", "BUY",  150.01,    72.0, "LIMIT"),
+        new OrderLeg(3, "EURJPY", "SELL", 162.00,    67.0, "LIMIT")
     );
     // notional = leg1.price × leg1.quantity = 1.0801 × 10_000 ≈ 10_801 USD
 
@@ -337,7 +471,7 @@ class AutoTraderTest {
         var result = autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
         assertThat(result.status()).isEqualTo("REJECTED_BALANCE");
-        verify(risk, never()).check(anyDouble());
+        verify(risk, never()).check(any(), anyDouble());
         verify(tradeRepo, never()).save(any());
     }
 
@@ -345,7 +479,7 @@ class AutoTraderTest {
     void manualTrade_rejected_whenRiskBlocked() {
         when(broker.openOrderCount()).thenReturn(0);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.block("limit"));
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.block("limit"));
 
         var result = autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
@@ -360,11 +494,11 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
-        // pair1=EURUSD, cycle A → spentCurrency = "USD"
+        // pair1=EURUSD, cycle A (leg1=BUY) → spentCurrency = "USD"
         // notional = 1.0801 × 10_000 = 10_801
         verify(positions).hasAvailableBalance(eq(Exchange.KRAKEN), eq("USD"), eq(1.0801 * 10_000.0));
     }
@@ -374,12 +508,14 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
-        autoTrader.executeTrade(TRI, "BSS", MANUAL_LEGS);
+        // Only SBS starts with SELL leg1 — see cycleB_checksBaseCurrency above.
+        autoTrader.executeTrade(TRI, "SBS", MANUAL_LEGS);
 
-        // pair1=EURUSD, cycle B → spentCurrency = "EUR"
-        verify(positions).hasAvailableBalance(eq(Exchange.KRAKEN), eq("EUR"), anyDouble());
+        // pair1=EURUSD, cycle SBS (leg1=SELL) → spentCurrency = "EUR" (leg3, SELL EURJPY, is
+        // also EUR-denominated, so this fires for both legs — atLeastOnce, not exactly once)
+        verify(positions, atLeastOnce()).hasAvailableBalance(eq(Exchange.KRAKEN), eq("EUR"), anyDouble());
     }
 
     @Test
@@ -387,11 +523,11 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
-        verify(risk).check(1.0801 * 10_000.0);
+        verify(risk).check(Exchange.KRAKEN, 1.0801 * 10_000.0);
     }
 
     // ── executeTrade — simulation ─────────────────────────────────────────────
@@ -401,7 +537,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         var result = autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
@@ -419,7 +555,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
@@ -438,7 +574,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
@@ -450,7 +586,7 @@ class AutoTraderTest {
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
@@ -466,7 +602,7 @@ class AutoTraderTest {
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeOrderLegs(any())).thenReturn(THREE_FILLED_LEGS);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         var result = autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
@@ -484,7 +620,7 @@ class AutoTraderTest {
         when(broker.isSimulation()).thenReturn(false);
         when(broker.placeOrderLegs(any())).thenReturn(ONE_FAILED_LEG);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         var result = autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
 
@@ -494,16 +630,32 @@ class AutoTraderTest {
     }
 
     @Test
+    void manualTrade_live_disablesExchange_whenLegRejected() {
+        var cfg = new ExchangeConfig().setExchange("KRAKEN").setEnabled(true);
+        when(configRepo.findByExchange("KRAKEN")).thenReturn(Optional.of(cfg));
+        when(broker.openOrderCount()).thenReturn(0);
+        when(broker.isSimulation()).thenReturn(false);
+        when(broker.placeOrderLegs(any())).thenReturn(ONE_FAILED_LEG);
+        when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
+
+        autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
+
+        assertThat(cfg.isEnabled()).isFalse();
+        verify(exchangeManager).deactivateExchange(Exchange.KRAKEN);
+        verify(alerts).exchangeDisabledForRejectedOrder(eq("KRAKEN"), anyString());
+    }
+
+    @Test
     void manualTrade_bypassesCooldown() {
         ReflectionTestUtils.setField(autoTrader, "tradeCooldownMs", 60_000L);
-        // force lastTradeCompletedMs to "just now" so attemptArbitrage would block
-        ReflectionTestUtils.setField(autoTrader, "lastTradeCompletedMs",
-            System.currentTimeMillis());
+        // force lastTradeCompleted to "just now" so attemptArbitrage would block
+        setLastTradeTime(Exchange.KRAKEN, System.currentTimeMillis());
 
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
 
         // manual trade must succeed even though cooldown hasn't elapsed
         var result = autoTrader.executeTrade(TRI, "BBS", MANUAL_LEGS);
@@ -521,17 +673,16 @@ class AutoTraderTest {
 
         when(broker.openOrderCount()).thenReturn(0);
         when(broker.isSimulation()).thenReturn(true);
-        when(arbitrageEngine.scanForOpportunities()).thenReturn(Optional.of(lowProfitSignal));
+        when(arbitrageEngine.scanForOpportunities(any())).thenReturn(Optional.of(lowProfitSignal));
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
         when(risk.checkProfit(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
             .thenReturn(RiskService.RiskResult.block("below minimum"));
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
         assertThat(autoTrader.getStats().missed()).isEqualTo(1);
-        verify(broker, never()).placeOrder(any(), anyDouble());
-        verify(broker, never()).computeLegs(any(), anyDouble());
+        verify(broker, never()).placeOrderLegs(any());
     }
 
     @Test
@@ -539,7 +690,7 @@ class AutoTraderTest {
         TRI.setMinProfitPercent(0.00025);
         when(broker.openOrderCount()).thenReturn(0);
         when(positions.hasAvailableBalance(any(), anyString(), anyDouble())).thenReturn(true);
-        when(risk.check(anyDouble())).thenReturn(RiskService.RiskResult.ok());
+        when(risk.check(any(), anyDouble())).thenReturn(RiskService.RiskResult.ok());
         when(risk.checkProfit(anyDouble(), anyDouble(), anyDouble(), anyDouble()))
             .thenReturn(RiskService.RiskResult.block("below minimum"));
 
@@ -554,14 +705,13 @@ class AutoTraderTest {
     @Test
     void attemptArbitrage_skips_withinCooldown() {
         ReflectionTestUtils.setField(autoTrader, "tradeCooldownMs", 60_000L);
-        ReflectionTestUtils.setField(autoTrader, "lastTradeCompletedMs",
-            System.currentTimeMillis());
+        setLastTradeTime(Exchange.KRAKEN, System.currentTimeMillis());
 
         when(broker.openOrderCount()).thenReturn(0);
 
-        autoTrader.attemptArbitrage();
+        autoTrader.attemptArbitrage(Exchange.KRAKEN);
 
-        verify(arbitrageEngine, never()).scanForOpportunities();
+        verify(arbitrageEngine, never()).scanForOpportunities(any());
     }
 
     // ── computePnlFromLegs ────────────────────────────────────────────────────
@@ -588,9 +738,9 @@ class AutoTraderTest {
         double qty2 = 151.55 / 1.17388;   // EUR (baseRate=rate("EUR"))
         double qty3 = qty2;                // EUR (same base for EURUSD)
         var legs = List.of(
-            new OrderLeg(1, "GBPUSD", "BUY",  ask1, qty1),
-            new OrderLeg(2, "EURGBP", "BUY",  ask2, qty2),
-            new OrderLeg(3, "EURUSD", "SELL", bid3, qty3)
+            new OrderLeg(1, "GBPUSD", "BUY",  ask1, qty1, "LIMIT"),
+            new OrderLeg(2, "EURGBP", "BUY",  ask2, qty2, "LIMIT"),
+            new OrderLeg(3, "EURUSD", "SELL", bid3, qty3, "LIMIT")
         );
 
         var pnl = autoTrader.computePnlFromLegs(legs, 151.55);
@@ -601,7 +751,6 @@ class AutoTraderTest {
     // ── calculateMaxVolume / computeLegs / computePnlFromLegs ───────────────────
 
     @Test
-    @SuppressWarnings("unchecked")
     void computeLegs_SBS_USDTRY_EURTRY_EURUSD_orderSize500() {
         // FX rates: USD/TRY=45.37 → rate("TRY")=1/45.37, EUR/USD=1.18 → rate("EUR")=1.18
         when(currencyRateFeed.getRate("USD")).thenReturn(1.0);
@@ -618,7 +767,7 @@ class AutoTraderTest {
         var obUsdTry = new OrderBook("USDTRY", 45.36,   500.0, 45.38, 1_000_000.0);
         var obEurTry = new OrderBook("EURTRY", 53.55, 1_000_000.0, 54.00, 1_000_000.0);
         var obEurUsd = new OrderBook("EURUSD",  1.20, 1_000_000.0,  1.22, 1_000_000.0);
-        var signal = new Signal(Exchange.KRAKEN, triSbs, com.ib.arb.scanner.Cycle.SBS,
+        var signal = new Signal(Exchange.KRAKEN, triSbs, Cycle.SBS,
                 0.432, obUsdTry, obEurTry, obEurUsd);
 
         // ── calculateMaxVolume ────────────────────────────────────────────────
@@ -633,8 +782,7 @@ class AutoTraderTest {
         //   leg1 SELL USDTRY (base=USD): 500 / rate("USD") = 500 USD
         //   leg2 BUY  EURTRY (base=EUR): 500 / rate("EUR") = 500/1.18 = 423.73 EUR
         //   leg3 SELL EURUSD (base=EUR): 500 / rate("EUR") = 423.73 EUR
-        var legs = (List<com.ib.arb.broker.OrderLeg>)
-                ReflectionTestUtils.invokeMethod(autoTrader, "computeLegs", signal, 500.0);
+        var legs = autoTrader.computeLegs(signal, 500.0);
 
         assertThat(legs).hasSize(3);
 
@@ -668,7 +816,7 @@ class AutoTraderTest {
         //   TRY: 22680−22881=−201 × (1/45.37) = −$4.43
         //   EUR: 0
         //   PnL ≈ $4.04
-        var pnl = (Double) ReflectionTestUtils.invokeMethod(autoTrader, "computePnlFromLegs", legs, 500.0);
+        var pnl = autoTrader.computePnlFromLegs(legs, 500.0);
         assertThat(pnl).isCloseTo(4.0, offset(0.1));
     }
 }
