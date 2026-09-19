@@ -1,4 +1,4 @@
-import { Component, useState } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import {
   CircularProgress, Box, Button, CssBaseline, ThemeProvider, createTheme,
@@ -63,13 +63,23 @@ function canAccess(role: string, path: string): boolean {
   return ['/', '/trades', '/prices', '/ccy-rates', '/currency-rates'].includes(path);
 }
 
-function NavBar() {
+function NavBar({ flashTrigger }: { flashTrigger: number }) {
   const path = window.location.pathname;
   const active = PAGES.includes(path as typeof PAGES[number]) ? path : '/';
   const { logout, user } = useAuth();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Flashes the nav strip twice within 1.5s whenever a real (non-simulation) trade fires -
+  // see AppRoutes, which increments flashTrigger on tradeInProgress's false->true edge.
+  const [flashOn, setFlashOn] = useState(false);
+  useEffect(() => {
+    if (flashTrigger === 0) return;
+    const timers = [0, 350, 700, 1050].map((delay, i) =>
+      setTimeout(() => setFlashOn(i % 2 === 0), delay));
+    return () => timers.forEach(clearTimeout);
+  }, [flashTrigger]);
 
   const nav = (href: string, label: string) => (
     <Button
@@ -106,7 +116,8 @@ function NavBar() {
         position: 'sticky',
         top: 0,
         zIndex: (t) => t.zIndex.appBar,
-        bgcolor: 'background.paper',
+        bgcolor: flashOn ? '#ffc107' : 'background.paper',
+        transition: 'background-color 0.15s ease',
         borderBottom: 1,
         borderColor: 'divider',
       }}
@@ -175,6 +186,20 @@ function AppRoutes() {
   const { user, isLoading } = useAuth();
   const live = useDashboardSocket();
 
+  // A real trade just started (tradeInProgress is only ever true for real trades, never
+  // simulations - see AutoTrader's settlement gate). Fires the nav-strip flash regardless of
+  // which tab is currently open, since NavBar is always mounted here above the active page.
+  const tradeInProgress = live?.tradeInProgress;
+  const [flashTrigger, setFlashTrigger] = useState(0);
+  const prevTradeInProgress = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (tradeInProgress == null) return;
+    if (prevTradeInProgress.current === false && tradeInProgress === true) {
+      setFlashTrigger((f) => f + 1);
+    }
+    prevTradeInProgress.current = tradeInProgress;
+  }, [tradeInProgress]);
+
   if (isLoading) {
     return (
       <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -190,9 +215,9 @@ function AppRoutes() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <NavBar />
+      <NavBar flashTrigger={flashTrigger} />
       <Box component="main" sx={{ flex: 1 }}>
-        {path === '/trades'             && <Trades />}
+        {path === '/trades'             && <Trades liveTrades={live?.recentTrades} />}
         {path === '/missed-opportunities' && <MissedOpportunities rows={live?.recentMissedOpportunities ?? []} />}
         {path === '/positions'    && canAccess(role, path) && <Positions />}
         {path === '/open-orders'  && canAccess(role, path) && <OpenOrders />}

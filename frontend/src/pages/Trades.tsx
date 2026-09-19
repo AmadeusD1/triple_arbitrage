@@ -119,7 +119,13 @@ function TradeDetailDialog({ tradeId, onClose }: { tradeId: number | null; onClo
   );
 }
 
-export default function Trades() {
+interface TradesProps {
+  // Last 20 trades, newest first, pushed over the dashboard WebSocket - merged into the
+  // full REST-loaded list below so a new trade appears at the top live, no refresh needed.
+  liveTrades?: Trade[];
+}
+
+export default function Trades({ liveTrades }: TradesProps) {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -146,6 +152,18 @@ export default function Trades() {
   const loadTrades = () => getTrades().then((res) => setTrades(res.data));
 
   useEffect(() => { loadTrades(); }, []);
+
+  // Trades never change after creation (see TradeController - no update endpoint), so
+  // merging just means prepending whichever ids we haven't seen yet; anything already
+  // loaded is left untouched, and new trades slot in above it without a refetch.
+  useEffect(() => {
+    if (!liveTrades?.length) return;
+    setTrades((prev) => {
+      const known = new Set(prev.map((t) => t.id));
+      const fresh = liveTrades.filter((t) => !known.has(t.id));
+      return fresh.length ? [...fresh, ...prev] : prev;
+    });
+  }, [liveTrades]);
 
   const handleDeleteSimulations = async () => {
     setDeleting(true);
